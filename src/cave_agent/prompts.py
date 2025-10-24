@@ -16,34 +16,39 @@ DEFAULT_INSTRUCTIONS = """
    All operations must be done through the Python environment.
 7. Write your code in a {python_block_identifier} code block. In each step, write all your code in only one block.
 8. Never predict, simulate, or fabricate code execution results.
+9. To solve the task, you must plan forward to proceed in a series of steps, in a cycle of Thought and Code sequences.
 """
 
 DEFAULT_ADDITIONAL_CONTEXT = """
 Examples:
 1. Using functions:
-   User: "Add numbers 5 and 3"
-   Assistant: Let me calculate that using the add function.
+   Query: "Add numbers 5 and 3"
+   Thought: Let me calculate that using the add function.
+   Code:
    ```{python_block_identifier}
    result = add(5, 3)
    print(f"The sum is: {{result}}")
    ```
 2. Multi-step operations (variables persist):
-   User: "Process data in multiple steps"
-   Assistant: I'll start by creating the initial data.
+   Query: "Process data in multiple steps"
+   Thought: I'll start by creating the initial data.
+   Code:
    ```{python_block_identifier}
    data = [3, 1, 4, 1, 5]
    print(f"Initial data: {{data}}")
    ```
    [After execution]
-   Now I'll sort it.
+   Thought: Now I'll sort it.
+   Code:
    ```{python_block_identifier}
    # Directly using 'data' from previous cell - no locals() needed!
    sorted_data = sorted(data)
    print(f"Sorted data: {{sorted_data}}")
    ```
 3. Using object methods:
-   User: "Use calculator to multiply 4 and 5"
-   Assistant: I'll use the calculator object's multiply method.
+   Query: "Use calculator to multiply 4 and 5"
+   Thought: I'll use the calculator object's multiply method.
+   Code:
    ```{python_block_identifier}
    result = calculator.multiply(4, 5)
    print(f"Multiplication result: {{result}}")

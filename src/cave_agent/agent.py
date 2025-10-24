@@ -10,7 +10,7 @@ from .streaming_text_parser import SegmentType, StreamingTextParser
 from enum import Enum, IntEnum
 from datetime import datetime
 from .constant import DEFAULT_PYTHON_BLOCK_IDENTIFIER
-import traceback
+
 class MessageRole(str, Enum):
     SYSTEM = "system"
     USER = "user"
@@ -196,7 +196,7 @@ class AgentResponse:
         """String representation of the response."""
         return f"AgentResponse(status={self.status.value}, steps={self.steps_taken}/{self.max_steps}, content={self.content})"
 
-class PyCallingAgent:
+class CaveAgent:
     """
     A tool-augmented agent that enables function-calling through LLM code generation.
     
@@ -232,7 +232,7 @@ class PyCallingAgent:
         >>> def add(a: int, b: int) -> int:
         ...     return a + b
         >>> 
-        >>> agent = PyCallingAgent(
+        >>> agent = CaveAgent(
         ...     model=llm_model,
         ...     runtime=PythonRuntime(functions=[Function(add)])
         ... )
@@ -257,7 +257,7 @@ class PyCallingAgent:
         max_execution_result_length: int = 3000,
         
     ):
-        """Initialize PyCallingAgent with improved parameter handling."""
+        """Initialize CaveAgent with improved parameter handling."""
         self.model = model
         self.system_prompt_template = system_prompt_template
         self.max_steps = max_steps
@@ -349,7 +349,7 @@ class PyCallingAgent:
         # Stream LLM response and collect
         chunks = []
         parser = StreamingTextParser(self.python_block_identifier)
-        
+
         async for chunk in self.model.stream(self._prepare_messages()):
             chunks.append(chunk)
             
@@ -360,13 +360,19 @@ class PyCallingAgent:
                     yield Event(EventType.TEXT, segment.content)
                 elif segment.type == SegmentType.CODE:
                     yield Event(EventType.CODE, segment.content)
+                    if parser.is_first_code_block_completed():
+                        break
+
+            if parser.is_first_code_block_completed():
+                break
         
-        final_segments = parser.flush()
-        for segment in final_segments:
-            if segment.type == SegmentType.TEXT:
-                yield Event(EventType.TEXT, segment.content)
-            elif segment.type == SegmentType.CODE:
-                yield Event(EventType.CODE, segment.content)
+        if not parser.is_first_code_block_completed():
+            final_segments = parser.flush()
+            for segment in final_segments:
+                if segment.type == SegmentType.TEXT:
+                    yield Event(EventType.TEXT, segment.content)
+                elif segment.type == SegmentType.CODE:
+                    yield Event(EventType.CODE, segment.content)
 
         model_response = "".join(chunks)
         # Process complete response
@@ -376,7 +382,7 @@ class PyCallingAgent:
     async def _process_model_response(self, model_response: str, context: ExecutionContext) -> str:
         """Process model response and execute code if needed."""
         code_snippet = extract_python_code(model_response, self.python_block_identifier)
-        
+
         if not code_snippet:
             # Final response without code
             self.add_message(AssistantMessage(model_response))
@@ -423,7 +429,7 @@ class PyCallingAgent:
         
         self.add_message(CodeExecutionMessage(model_response))
 
-        self.logger.debug("Code snippet", code_snippet, "green")
+        self.logger.debug("Code Execution", model_response, "green")
         execution_result = await self.runtime.execute(code_snippet)
     
         if not execution_result.success and isinstance(execution_result.error, SecurityError):

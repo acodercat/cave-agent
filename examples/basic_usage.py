@@ -1,6 +1,6 @@
-from py_calling_agent import PyCallingAgent
-from py_calling_agent.models import LiteLLMModel
-from py_calling_agent.python_runtime import PythonRuntime, Function, Variable
+from cave_agent import CaveAgent
+from cave_agent.models import LiteLLMModel
+from cave_agent.python_runtime import PythonRuntime, Function, Variable
 import os
 import asyncio
 
@@ -47,7 +47,7 @@ async def main():
     )
     
     # Create agent
-    agent1 = PyCallingAgent(model, runtime=runtime1)
+    agent1 = CaveAgent(model, runtime=runtime1)
     
     # Run simple calculations
     response = await agent1.run("Calculate 5 plus 3")
@@ -86,7 +86,7 @@ async def main():
     )
     
     # Create agent
-    agent2 = PyCallingAgent(model, runtime=runtime2)
+    agent2 = CaveAgent(model, runtime=runtime2)
     
     # Run task using injected objects
     response = await agent2.run("Use processor to sort the numbers and store the result in the 'result' variable")
@@ -102,7 +102,7 @@ async def main():
     runtime3 = PythonRuntime(
         functions=[Function(add), Function(multiply)]
     )
-    agent3 = PyCallingAgent(model, runtime=runtime3)
+    agent3 = CaveAgent(model, runtime=runtime3)
     
     # Stream events
     async for event in agent3.stream_events("Calculate 10 plus 20, then multiply the result by 3"):

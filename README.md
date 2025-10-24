@@ -1,17 +1,17 @@
-# 🤖 PyCallingAgent
+# 🤖 CaveAgent
 **🚀 AI that executes, not just generates!**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![PyPI version](https://img.shields.io/badge/pypi-0.4.4-blue.svg)](https://pypi.org/project/py-calling-agent)
+[![PyPI version](https://img.shields.io/badge/pypi-0.4.4-blue.svg)](https://pypi.org/project/cave-agent)
 
-PyCallingAgent is a tool-augmented agent framework that enables function-calling through LLM code generation and provides runtime state management. Unlike traditional JSON-schema approaches, it leverages LLM's inherent coding capabilities to interact with tools through a Python runtime environment, allowing direct access to execution results and runtime state.
+CaveAgent is a tool-augmented agent framework that enables function-calling through LLM code generation and provides runtime state management. Unlike traditional JSON-schema approaches, it leverages LLM's inherent coding capabilities to interact with tools through a Python runtime environment, allowing direct access to execution results and runtime state.
 
 > *"When your AI needs to run code, not just write it"*
 
-## Why PyCallingAgent?
+## Why CaveAgent?
 
-**Traditional function calling is broken.** JSON schemas are rigid, error-prone, and limit what your AI can do. PyCallingAgent unleashes your LLM's natural coding abilities:
+**Traditional function calling is broken.** JSON schemas are rigid, error-prone, and limit what your AI can do. CaveAgent unleashes your LLM's natural coding abilities:
 
 - 🧠 **Native Code Generation** - LLMs excel at writing code, not parsing JSON
 - ⚡ **Fewer Iterations** - Execute complex multi-step workflows in a single turn
@@ -24,26 +24,26 @@ PyCallingAgent is a tool-augmented agent framework that enables function-calling
 ## Quick Start
 
 ```bash
-pip install 'py-calling-agent[all]'
+pip install 'cave-agent[all]'
 ```
 
 Choose your installation:
 
 ```bash
 # OpenAI support
-pip install 'py-calling-agent[openai]'
+pip install 'cave-agent[openai]'
 
 # 100+ LLM providers via LiteLLM 
-pip install 'py-calling-agent[litellm]'
+pip install 'cave-agent[litellm]'
 ```
 
 ### Simple Function Calling
 
 ```python
 import asyncio
-from py_calling_agent import PyCallingAgent
-from py_calling_agent.models import OpenAIServerModel
-from py_calling_agent.python_runtime import PythonRuntime, Function, Variable
+from cave_agent import CaveAgent
+from cave_agent.models import OpenAIServerModel
+from cave_agent.python_runtime import PythonRuntime, Function, Variable
 
 async def main():
     # Initialize LLM model
@@ -86,7 +86,7 @@ async def main():
         ]
     )
 
-    agent = PyCallingAgent(model, runtime=runtime)
+    agent = CaveAgent(model, runtime=runtime)
 
     await agent.run("Add buy groceries and call mom to my tasks")
     print(f"Current tasks: {runtime.get_variable_value('tasks')}")
@@ -105,9 +105,9 @@ if __name__ == "__main__":
 
 ```python
 import asyncio
-from py_calling_agent import PyCallingAgent
-from py_calling_agent.models import LiteLLMModel
-from py_calling_agent.python_runtime import PythonRuntime, Function, Variable
+from cave_agent import CaveAgent
+from cave_agent.models import LiteLLMModel
+from cave_agent.python_runtime import PythonRuntime, Function, Variable
 
 async def main():
     # Initialize LLM model
@@ -168,7 +168,7 @@ async def main():
     )
 
     # Create agent
-    agent = PyCallingAgent(model, runtime=runtime)
+    agent = CaveAgent(model, runtime=runtime)
 
     # Process data
     await agent.run("Use processor to sort and deduplicate numbers")
@@ -200,14 +200,14 @@ async for event in agent.stream_events("Analyze this data and create a summary")
 
 ### Security Features
 
-PyCallingAgent includes rule-based security to prevent dangerous code execution:
+CaveAgent includes rule-based security to prevent dangerous code execution:
 
 ```python
 import asyncio
-from py_calling_agent import PyCallingAgent
-from py_calling_agent.models import OpenAIServerModel
-from py_calling_agent.python_runtime import PythonRuntime
-from py_calling_agent.security_checker import (
+from cave_agent import CaveAgent
+from cave_agent.models import OpenAIServerModel
+from cave_agent.python_runtime import PythonRuntime
+from cave_agent.security_checker import (
     SecurityChecker, ImportRule, FunctionRule, AttributeRule, RegexRule
 )
 
@@ -229,7 +229,7 @@ async def main():
     checker = SecurityChecker(rules)
     runtime = PythonRuntime(security_checker=checker)
     
-    agent = PyCallingAgent(model, runtime=runtime)
+    agent = CaveAgent(model, runtime=runtime)
     
     # This will be blocked by security
     try:
@@ -268,11 +268,11 @@ For more examples, check out the [examples](examples) directory:
 
 ## LLM Provider Support
 
-PyCallingAgent supports multiple LLM providers:
+CaveAgent supports multiple LLM providers:
 
 ### OpenAI-Compatible Models
 ```python
-from py_calling_agent.models import OpenAIServerModel
+from cave_agent.models import OpenAIServerModel
 
 model = OpenAIServerModel(
     model_id="gpt-4",
@@ -285,7 +285,7 @@ model = OpenAIServerModel(
 LiteLLM provides unified access to hundreds of LLM providers:
 
 ```python
-from py_calling_agent.models import LiteLLMModel
+from cave_agent.models import LiteLLMModel
 
 # OpenAI
 model = LiteLLMModel(

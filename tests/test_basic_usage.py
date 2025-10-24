@@ -1,5 +1,5 @@
-from py_calling_agent import PyCallingAgent
-from py_calling_agent.python_runtime import PythonRuntime, Function
+from cave_agent import CaveAgent
+from cave_agent.python_runtime import PythonRuntime, Function
 import pytest
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def basic_agent(model):
         functions=[add_func, multiply_func]
     )
     
-    return PyCallingAgent(
+    return CaveAgent(
         model,
         runtime=runtime
     )

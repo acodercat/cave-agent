@@ -1,7 +1,7 @@
 import pytest
 from dataclasses import dataclass
-from py_calling_agent import PyCallingAgent
-from py_calling_agent.python_runtime import PythonRuntime, Variable
+from cave_agent import CaveAgent
+from cave_agent.python_runtime import PythonRuntime, Variable
 
 @dataclass
 class DataProcessor:
@@ -63,7 +63,7 @@ def object_agent(model, processor, numbers):
         variables=[processor_var, numbers_var, processed_data_var, filtered_data_var]
     )
     
-    return PyCallingAgent(
+    return CaveAgent(
         model,
         runtime=runtime
     )

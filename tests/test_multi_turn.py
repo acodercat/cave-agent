@@ -1,6 +1,6 @@
 import pytest
-from py_calling_agent import PyCallingAgent
-from py_calling_agent.python_runtime import PythonRuntime, Variable
+from cave_agent import CaveAgent
+from cave_agent.python_runtime import PythonRuntime, Variable
 
 class DataAnalyzer:
     """A data analyzer that provides statistical analysis for numerical data."""
@@ -47,7 +47,7 @@ def multi_turn_agent(model, analyzer, numbers):
         variables=[analyzer_var, numbers_var, stats_var]
     )
     
-    return PyCallingAgent(
+    return CaveAgent(
         model,
         runtime=runtime
     )

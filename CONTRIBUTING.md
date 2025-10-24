@@ -1,6 +1,6 @@
-## Contribute to PyCallingAgent
+## Contribute to CaveAgent
 
-We welcome contributions to PyCallingAgent! Here's how you can help:
+We welcome contributions to CaveAgent! Here's how you can help:
 
 ### Types of Contributions
 

@@ -1,9 +1,9 @@
 import pytest
 
-from py_calling_agent.security_checker import (
+from cave_agent.security_checker import (
     SecurityChecker, SecurityError, ImportRule, FunctionRule, AttributeRule, RegexRule
 )
-from py_calling_agent.python_runtime import PythonRuntime, PythonExecutor
+from cave_agent.python_runtime import PythonRuntime, PythonExecutor
 
 
 class TestSecurityChecker:

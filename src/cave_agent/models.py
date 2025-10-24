@@ -46,7 +46,7 @@ class OpenAIServerModel(Model):
             import openai
         except ModuleNotFoundError:
             raise ModuleNotFoundError(
-                "Please install 'openai' extra to use OpenAIServerModel: `pip install 'py_calling_agent[openai]'`"
+                "Please install 'openai' extra to use OpenAIServerModel: `pip install 'cave_agent[openai]'`"
             )
 
         self.kwargs = kwargs
@@ -120,7 +120,7 @@ class LiteLLMModel(Model):
             import litellm
         except ModuleNotFoundError:
             raise ModuleNotFoundError(
-                "Please install 'litellm' extra to use LiteLLMModel: `pip install 'py_calling_agent[litellm]'`"
+                "Please install 'litellm' extra to use LiteLLMModel: `pip install 'cave_agent[litellm]'`"
             )
         self.kwargs = kwargs
         self.model_id = model_id

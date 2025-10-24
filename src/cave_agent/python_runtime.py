@@ -4,6 +4,7 @@ from IPython.utils.capture import capture_output
 import inspect
 from .security_checker import SecurityChecker, SecurityError
 from traitlets.config import Config
+from enum import Enum
 
 class ExecutionResult:
     """
@@ -20,30 +21,22 @@ class ExecutionResult:
     def success(self):
         return self.error is None
 
+class ErrorFeedbackMode(Enum):
+    """Error feedback modes for LLM agent observation."""
+    PLAIN = "Plain"      # Full traceback for agent debugging
+    MINIMAL = "Minimal"     # Brief error info for agent efficiency
+
 class PythonExecutor:
     """
     Handles Python code execution using IPython.
     """
 
-    def __init__(self, security_checker: Optional[SecurityChecker] = None):
+    def __init__(self, security_checker: Optional[SecurityChecker] = None, error_feedback_mode: ErrorFeedbackMode = ErrorFeedbackMode.PLAIN):
         """Initialize IPython shell for code execution."""
-        
-        config = Config()
-        config.InteractiveShell.cache_size = 0 
-        config.InteractiveShell.history_length = 0
-        config.InteractiveShell.automagic = False
-        config.InteractiveShell.separate_in = ''
-        config.InteractiveShell.separate_out = ''
-        config.InteractiveShell.separate_out2 = ''
-        config.InteractiveShell.autocall = 0
-        config.InteractiveShell.colors = 'nocolor'
-        config.InteractiveShell.xmode = 'Minimal'
-        config.InteractiveShell.quiet = True
-        config.InteractiveShell.autoindent = False
-
-        self._shell = InteractiveShell(config=config)
+        ipython_config = self.create_ipython_config(error_feedback_mode=error_feedback_mode)
+        self._shell = InteractiveShell(config=ipython_config)
         self._security_checker = security_checker
-        
+
     def inject_into_namespace(self, name: str, value: Any):
         """Inject a value into the execution namespace."""
         self._shell.user_ns[name] = value
@@ -107,6 +100,25 @@ class PythonExecutor:
         self._shell.reset()
         import gc
         gc.collect()
+        
+    @staticmethod
+    def create_ipython_config(error_feedback_mode: ErrorFeedbackMode = ErrorFeedbackMode.PLAIN) -> Config:
+        """"Create a clean IPython configuration optimized for code execution."""
+        config = Config()
+        config.InteractiveShell.cache_size = 0 
+        config.InteractiveShell.history_length = 0
+        config.InteractiveShell.automagic = False
+        config.InteractiveShell.separate_in = ''
+        config.InteractiveShell.separate_out = ''
+        config.InteractiveShell.separate_out2 = ''
+        config.InteractiveShell.autocall = 0
+        config.InteractiveShell.colors = 'nocolor'
+        config.InteractiveShell.xmode = error_feedback_mode.value
+        config.InteractiveShell.quiet = True
+        config.InteractiveShell.autoindent = False
+        
+        return config
+
 
 class Variable:
     """Represents a variable in the Python runtime environment."""
@@ -116,14 +128,14 @@ class Variable:
     doc: Optional[str] = None
     type: str
 
-    def __init__(self, name: str, value: Optional[Any] = None, description: Optional[str] = None):
+    def __init__(self, name: str, value: Optional[Any] = None, description: Optional[str] = None, include_doc: bool = True):
         """Initialize the variable."""
         self.name = name
         self.value = value
         self.description = description
         self.type = type(self.value).__name__
 
-        if hasattr(self.value, "__doc__") and self.value.__doc__ and self.value.__doc__.strip():
+        if include_doc and hasattr(self.value, "__doc__") and self.value.__doc__ and self.value.__doc__.strip():
             self.doc = self.value.__doc__.strip()
         
     def __str__(self):
@@ -144,15 +156,16 @@ class Function:
     doc: Optional[str] = None
     name: str
     signature: str
+    include_doc: bool
 
-
-    def __init__(self, func: Callable, description: Optional[str] = None):
+    def __init__(self, func: Callable, description: Optional[str] = None, include_doc: bool = True):
         """Initialize the function."""
         self.func = func
         self.description = description
         self.name = func.__name__
         self.signature = f"{self.name}{inspect.signature(self.func)}"
-        if hasattr(self.func, "__doc__") and self.func.__doc__ and self.func.__doc__.strip():
+
+        if include_doc and hasattr(self.func, "__doc__") and self.func.__doc__ and self.func.__doc__.strip():
             self.doc = self.func.__doc__
         
     
@@ -176,6 +189,7 @@ class PythonRuntime:
         functions: List[Function] = [],
         variables: List[Variable] = [],
         security_checker: Optional[SecurityChecker] = None,
+        error_feedback_mode: ErrorFeedbackMode = ErrorFeedbackMode.PLAIN,
     ):
         """
         Initialize runtime with executor and optional initial resources.
@@ -186,7 +200,7 @@ class PythonRuntime:
             security_checker: Security checker instance to use for code execution
         """
             
-        self._executor = PythonExecutor(security_checker=security_checker)
+        self._executor = PythonExecutor(security_checker=security_checker, error_feedback_mode=error_feedback_mode)
         self._functions: Dict[str, Function] = {}
         self._variables: Dict[str, Variable] = {}
 

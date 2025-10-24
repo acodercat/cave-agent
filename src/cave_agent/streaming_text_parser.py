@@ -45,6 +45,7 @@ class StreamingTextParser:
             language_identifier: Language identifier for code blocks (default: "python")
         """
         self.language_identifier = language_identifier
+        self.first_code_block_completed = False
         self._reset_state()
         
     def process_chunk(self, chunk: str) -> List[Segment]:
@@ -182,6 +183,10 @@ class StreamingTextParser:
         
         return []
     
+    def is_first_code_block_completed(self) -> bool:
+        """Check if the first code block is completed."""
+        return self.first_code_block_completed
+
     def _handle_language_match_mode(self, char: str) -> List[Segment]:
         """
         Handle character in LANGUAGE_MATCH mode.
@@ -248,6 +253,7 @@ class StreamingTextParser:
                     segments.append(Segment(SegmentType.CODE, self.code_buffer.strip()))
                     self.code_buffer = ""
                 self._exit_code_block()
+                self.first_code_block_completed = True
                 return segments
         else:
             # Not a code block end - backticks are part of code content

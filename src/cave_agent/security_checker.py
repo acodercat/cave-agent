@@ -170,7 +170,7 @@ class SecurityChecker:
     security rules.
     
     Example:
-        >>> from py_calling_agent.security_checker import SecurityChecker, ImportRule, FunctionRule, AttributeRule, EvalExecRule, RegexRule
+        >>> from cave_agent.security_checker import SecurityChecker, ImportRule, FunctionRule, AttributeRule, EvalExecRule, RegexRule
         >>> checker = SecurityChecker([
         >>>     ImportRule(set(["os", "subprocess", "sys", "shutil", "pathlib", "socket", "urllib", "http", "ctypes", "gc", "csv"])),
         >>>     FunctionRule(set(["eval", "exec", "compile", "open", "input", "raw_input", "exit", "quit", "__import__", "globals", "locals", "breakpoint"])),
