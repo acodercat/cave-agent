@@ -1,6 +1,8 @@
+
+
 # 🤖 CaveAgent
 **🚀 AI that executes, not just generates!**
-
+![CaveAgent Logo](Logo-CaveAgent.png)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://img.shields.io/badge/pypi-0.4.4-blue.svg)](https://pypi.org/project/cave-agent)
