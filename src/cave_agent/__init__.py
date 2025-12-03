@@ -1,6 +1,6 @@
 from .agent import CaveAgent, Message, MessageRole, LogLevel, Logger, EventType
 from .models import Model, OpenAIServerModel, LiteLLMModel
-from .python_runtime import PythonRuntime
+from .python_runtime import PythonRuntime, Function, Variable, Type
 from .security_checker import SecurityChecker, SecurityError, SecurityViolation, SecurityRule, ImportRule, FunctionRule, AttributeRule, RegexRule
 
 __all__ = [
@@ -14,6 +14,9 @@ __all__ = [
     "Logger",
     "EventType",
     "PythonRuntime",
+    "Function",
+    "Variable",
+    "Type",
     "SecurityChecker",
     "SecurityError",
     "SecurityViolation",

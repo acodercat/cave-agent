@@ -1,21 +1,27 @@
-# 🤖 CaveAgent
-**🚀 AI that executes, not just generates!**
+<p align="center">
+  <img src="https://github.com/acodercat/cave-agent/raw/master/banner.png" alt="CaveAgent">
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![PyPI version](https://img.shields.io/badge/pypi-0.4.4-blue.svg)](https://pypi.org/project/cave-agent)
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+"></a>
+  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/pypi-0.6.0-blue.svg" alt="PyPI version"></a>
+</p>
 
-CaveAgent is a tool-augmented agent framework that enables function-calling through LLM code generation and provides runtime state management. Unlike traditional JSON-schema approaches, it leverages LLM's inherent coding capabilities to interact with tools through a Python runtime environment, allowing direct access to execution results and runtime state.
+<p align="center">
+  <em>"When your AI needs to run code, not just write it"</em>
+</p>
 
-> *"When your AI needs to run code, not just write it"*
+---
+
+Traditional LLM agents operate under a **text-in-text-out** paradigm, with tool interactions constrained to JSON primitives. CaveAgent breaks this limitation by natively accepting, manipulating, and outputting complex Python objects—such as `DataFrames`, `ndarrays`, and custom instances—within a persistent runtime, enabling **precise computation** and **lossless data flow** across multi-turn interactions.
+
 
 ## Why CaveAgent?
 
-**Traditional function calling is broken.** JSON schemas are rigid, error-prone, and limit what your AI can do. CaveAgent unleashes your LLM's natural coding abilities:
-
 - 🧠 **Native Code Generation** - LLMs excel at writing code, not parsing JSON
 - ⚡ **Fewer Iterations** - Execute complex multi-step workflows in a single turn
-- 🔄 **Persistent State** - Maintain variables and objects across conversations  
+- 🔄 **Persistent State** — DataFrames, graphs, and objects survive across turns
 - 🎯 **Maximum Flexibility** - Handle dynamic workflows that JSON schemas can't express
 - 🛡️ **Secure by Design** - AST validation prevents dangerous code execution
 - 📡 **Real-time Streaming** - Watch your AI think and execute in real-time
@@ -89,10 +95,10 @@ async def main():
     agent = CaveAgent(model, runtime=runtime)
 
     await agent.run("Add buy groceries and call mom to my tasks")
-    print(f"Current tasks: {runtime.get_variable_value('tasks')}")
+    print(f"Current tasks: {runtime.get_variable('tasks')}")
 
     await agent.run("Mark groceries done and remind me about mom")
-    print(f"Final state: {runtime.get_variable_value('tasks')}")
+    print(f"Final state: {runtime.get_variable('tasks')}")
 
     response = await agent.run("What's my progress?")
     print(response.content)
@@ -107,7 +113,7 @@ if __name__ == "__main__":
 import asyncio
 from cave_agent import CaveAgent
 from cave_agent.models import LiteLLMModel
-from cave_agent.python_runtime import PythonRuntime, Function, Variable
+from cave_agent.python_runtime import PythonRuntime, Variable, Type
 
 async def main():
     # Initialize LLM model
@@ -117,68 +123,68 @@ async def main():
         base_url="your-base-url"
     )
 
-    # Define a class with methods
-    class DataProcessor:
-        """A utility class for processing and filtering data collections.
-        
-        This class provides methods for basic data processing operations such as
-        sorting, removing duplicates, and filtering based on thresholds.
-        
-        Example:
-            >>> processor = DataProcessor()
-            >>> processor.process_list([3, 1, 2, 1, 3])
-            [1, 2, 3]
-            >>> processor.filter_numbers([1, 5, 3, 8, 2], 4)
-            [5, 8]
-        """
-        def process_list(self, data: list) -> list:
-            """Sort a list and remove duplicates"""
-            return sorted(set(data))
-        
-        def filter_numbers(self, data: list, threshold: int) -> list:
-            """Filter numbers greater than threshold"""
-            return [x for x in data if x > threshold]
+    # Define smart home device classes
+    class Light:
+        """A smart light with brightness control."""
+        def __init__(self, name: str, is_on: bool = False, brightness: int = 100):
+            self.name = name
+            self.is_on = is_on
+            self.brightness = brightness
 
-    # Prepare context
-    processor = DataProcessor()
-    numbers = [3, 1, 4, 1, 5, 9, 2, 6, 5]
+        def turn_on(self):
+            """Turn the light on."""
+            self.is_on = True
 
-    # Create runtime with variables and functions
+        def turn_off(self):
+            """Turn the light off."""
+            self.is_on = False
+
+        def set_brightness(self, brightness: int):
+            """Set brightness level (0-100)."""
+            self.brightness = max(0, min(100, brightness))
+            if self.brightness > 0:
+                self.is_on = True
+
+    class Thermostat:
+        """A smart thermostat."""
+        def __init__(self, current_temp: int = 20, target_temp: int = 20):
+            self.current_temp = current_temp
+            self.target_temp = target_temp
+
+        def set_temperature(self, temp: int):
+            """Set target temperature."""
+            self.target_temp = temp
+
+    # Create device instances
+    living_room_light = Light("Living Room", is_on=True, brightness=80)
+    bedroom_light = Light("Bedroom", is_on=False)
+    thermostat = Thermostat(current_temp=20, target_temp=20)
+
+    # Create runtime with variables and type schemas
     runtime = PythonRuntime(
+        types=[
+            Type(Light),
+            Type(Thermostat),
+        ],
         variables=[
-            Variable(
-                name="processor",
-                value=processor,
-                description="Data processing tool with various methods"
-            ),
-            Variable(
-                name="numbers",
-                value=numbers,
-                description="Input list of numbers"
-            ),
-            Variable(
-                name="processed_data",
-                description="Store processed data in this variable"
-            ),
-            Variable(
-                name="filtered_data",
-                description="Store filtered data in this variable"
-            )
-        ]
+            Variable("living_room_light", living_room_light, "Smart light in living room"),
+            Variable("bedroom_light", bedroom_light, "Smart light in bedroom"),
+            Variable("thermostat", thermostat, "Home thermostat"),
+        ],
     )
 
     # Create agent
     agent = CaveAgent(model, runtime=runtime)
 
-    # Process data
-    await agent.run("Use processor to sort and deduplicate numbers")
-    processed_data = agent.runtime.get_variable_value('processed_data')
-    print("Processed data:", processed_data)
+    # Control smart home - LLM can manipulate objects directly
+    await agent.run("Dim the living room light to 20% and set thermostat to 22°C")
 
-    # Filter data
-    await agent.run("Filter numbers greater than 4")
-    filtered_data = agent.runtime.get_variable_value('filtered_data')
-    print("Filtered data:", filtered_data)
+    # Validate the changes by getting variables from runtime
+    light = runtime.get_variable("living_room_light")
+    thermostat = runtime.get_variable("thermostat")
+
+    print(f"Living room light: {light.brightness}% brightness, {'ON' if light.is_on else 'OFF'}")
+    print(f"Thermostat: {thermostat.target_temp}°C")
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -190,11 +196,11 @@ Watch your AI think and execute code in real-time:
 
 ```python
 async for event in agent.stream_events("Analyze this data and create a summary"):
-    if event.type.value == 'CODE':
+    if event.type.value == 'code':
         print(f"🔧 Executing: {event.content}")
-    elif event.type.value == 'EXECUTION_RESULT':
+    elif event.type.value == 'execution_output':
         print(f"✅ Result: {event.content}")
-    elif event.type.value == 'TEXT':
+    elif event.type.value == 'text':
         print(event.content, end="", flush=True)
 ```
 
@@ -241,10 +247,58 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+### Type Injection
+
+Types from Variables and Functions are automatically injected into the runtime namespace, allowing the LLM to use `isinstance()` checks and create new instances. By default, type schemas are hidden from the prompt.
+
+To expose type information to the LLM, use explicit `Type` injection:
+
+```python
+from cave_agent.python_runtime import PythonRuntime, Variable, Type
+
+class Light:
+    """A smart light device."""
+    def turn_on(self) -> str: ...
+    def turn_off(self) -> str: ...
+
+light = Light()
+
+# Types auto-injected but schema hidden (default)
+runtime = PythonRuntime(
+    variables=[Variable("light", light, "A smart light")],
+)
+
+# Explicitly show type schema in <types> section
+runtime = PythonRuntime(
+    types=[Type(Light)],  # Schema shown by default
+    variables=[Variable("light", light, "A smart light")],
+)
+
+# Control schema and doc separately
+runtime = PythonRuntime(
+    types=[
+        Type(Light, include_schema=True, include_doc=False),  # Methods only
+        Type(Lock, include_schema=False, include_doc=True),   # Docstring only
+    ],
+    variables=[...],
+)
+```
+
+When enabled, types appear in a dedicated `<types>` section:
+```
+<types>
+Light:
+  doc: A smart light device.
+  methods:
+    - turn_on() -> str
+    - turn_off() -> str
+</types>
+```
+
 ## Key Features
 
 - **🤖 Code-Based Function Calling**: Leverages LLM's natural coding abilities instead of rigid JSON schemas
-- **🛡️ Secure Runtime Environment**: 
+- **🛡️ Secure Runtime Environment**:
   - Inject Python objects, variables, and functions as tools
   - Rule-based security validation prevents dangerous code execution
   - Flexible security rules: ImportRule, FunctionRule, AttributeRule, RegexRule
@@ -255,6 +309,7 @@ if __name__ == "__main__":
 - **🛡️ Execution Control**: Configurable step limits and error handling to prevent infinite loops
 - **🎯 Unmatched Flexibility**: JSON schemas break with dynamic workflows. Python code adapts to any situation - conditional logic, loops, and complex data transformations.
 - **🌐 Flexible LLM Support**: Works with any LLM provider via OpenAI-compatible APIs or LiteLLM
+- **📋 Type Injection**: Auto-inject types for `isinstance()` checks; explicit Type injection to expose schemas to the LLM
 
 ## Real-World Examples
 

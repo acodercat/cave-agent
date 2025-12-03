@@ -32,7 +32,7 @@ class OpenAIServerModel(Model):
             project: Optional[str] = None,
             **kwargs
         ):
-        """Initialize OpenAI LLM engine.
+        """Initialize OpenAI model.
         
         Args:
             model_id: Model identifier
@@ -108,7 +108,7 @@ class LiteLLMModel(Model):
             api_key: Optional[str] = None,
             **kwargs
         ):
-        """Initialize OpenAI LLM engine.
+        """Initialize LiteLLM model.
         
         Args:
             model_id: Model identifier

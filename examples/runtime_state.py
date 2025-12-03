@@ -42,12 +42,12 @@ async def main():
     
     # Sort numbers and get result
     await agent.run("Sort the numbers list")
-    sorted_result = runtime.get_variable_value('sorted_numbers')
+    sorted_result = runtime.get_variable('sorted_numbers')
     print("Sorted numbers:", sorted_result)
     
     # Calculate sum and get result
     await agent.run("Calculate the sum of all numbers")
-    total = runtime.get_variable_value('sum_result')
+    total = runtime.get_variable('sum_result')
     print("Sum:", total)
 
 if __name__ == "__main__":

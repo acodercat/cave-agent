@@ -38,11 +38,11 @@ def state_agent(model, numbers):
 @pytest.mark.asyncio
 async def test_sort_numbers(state_agent):
     await state_agent.run("Sort the numbers list")
-    sorted_result = state_agent.runtime.get_variable_value('sorted_numbers')
+    sorted_result = state_agent.runtime.get_variable('sorted_numbers')
     assert sorted_result == sorted([1, 1, 2, 3, 4, 5, 5, 6, 9])
 
 @pytest.mark.asyncio
 async def test_calculate_sum(state_agent):
     await state_agent.run("Calculate the sum of all numbers")
-    total = state_agent.runtime.get_variable_value('sum_result')
+    total = state_agent.runtime.get_variable('sum_result')
     assert total == 36  # sum of [3,1,4,1,5,9,2,6,5]

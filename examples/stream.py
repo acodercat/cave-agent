@@ -1,6 +1,6 @@
 from cave_agent import CaveAgent, LogLevel, Logger
 from cave_agent.models import OpenAIServerModel
-from cave_agent.python_runtime import PythonRuntime, Variable
+from cave_agent.python_runtime import PythonRuntime, Variable, Type
 import os
 import asyncio
 from rich.syntax import Syntax
@@ -45,7 +45,8 @@ async def main():
     
     # Create runtime
     runtime = PythonRuntime(
-        variables=[processor_var, numbers_var, result_var]
+        variables=[processor_var, numbers_var, result_var],
+        types=[Type(DataProcessor)]
     )
     
     # Create agent
@@ -69,8 +70,8 @@ async def main():
         if event.type.name == 'CODE':
             logger.debug("Executing code", event.content, "cyan")
         
-        if event.type.name == 'EXECUTION_RESULT':
-            logger.info("Execution result", event.content, 'yellow')
+        if event.type.name == 'EXECUTION_OUTPUT':
+            logger.info("Execution output", event.content, 'yellow')
         
         if event.type.name == 'EXECUTION_ERROR':
             logger.error("Execution error", event.content, 'yellow')
@@ -80,9 +81,9 @@ async def main():
     
     print("\n")
     logger.info("Runtime State", str({
-        'processor': agent.runtime.get_variable_value('processor'),
-        'numbers': agent.runtime.get_variable_value('numbers'),
-        'result': agent.runtime.get_variable_value('result')
+        'processor': agent.runtime.get_variable('processor'),
+        'numbers': agent.runtime.get_variable('numbers'),
+        'result': agent.runtime.get_variable('result')
     }), 'yellow')
 
 if __name__ == "__main__":
