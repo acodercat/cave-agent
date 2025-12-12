@@ -1,7 +1,7 @@
 import ast
 import re
 from abc import ABC, abstractmethod
-from typing import List, Set
+from typing import List, Set, Optional
 from dataclasses import dataclass
 
 
@@ -18,10 +18,6 @@ class SecurityRule(ABC):
     the check method to analyze AST nodes for violations.
     """
     
-    def __init__(self, name: str, description: str):
-        self.name = name
-        self.description = description
-    
     @abstractmethod
     def check(self, node: ast.AST) -> List[SecurityViolation]:
         """Check if the AST node violates this rule.
@@ -33,19 +29,12 @@ class SecurityRule(ABC):
             List of violations found (empty if none)
         """
         pass
-    
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(name='{self.name}')"
 
 
 class ImportRule(SecurityRule):
     """Rule to detect forbidden imports."""
     
     def __init__(self, forbidden_modules: Set[str]):
-        super().__init__(
-            "forbidden_imports",
-            "Detects forbidden imports"
-        )
         self.forbidden_modules = forbidden_modules
     
     def check(self, node: ast.AST) -> List[SecurityViolation]:
@@ -70,11 +59,8 @@ class ImportRule(SecurityRule):
 class FunctionRule(SecurityRule):
     """Rule to detect forbidden function calls."""
     
-    def __init__(self, forbidden_functions: Set[str]):
-        super().__init__(
-            "forbidden_functions",
-            "Detects forbidden function calls"
-        )
+    def __init__(self, forbidden_functions: Set[str], description: Optional[str] = None):
+        self.description = description
         self.forbidden_functions = forbidden_functions
     
     def check(self, node: ast.AST) -> List[SecurityViolation]:
@@ -83,9 +69,11 @@ class FunctionRule(SecurityRule):
         if isinstance(node, ast.Call):
             func_name = self._get_function_name(node.func)
             if func_name in self.forbidden_functions:
-                violations.append(SecurityViolation(
-                    message=f"Forbidden function call detected: {func_name} at line {node.lineno}",
-                ))
+                message = f"Forbidden function call '{func_name}' at line {node.lineno}"
+                if self.description:
+                    message += f": {self.description}"
+                
+                violations.append(SecurityViolation(message=message))
         
         return violations
     
@@ -110,10 +98,6 @@ class AttributeRule(SecurityRule):
     """Rule to detect forbidden attribute access."""
     
     def __init__(self, forbidden_attributes: Set[str]):
-        super().__init__(
-            "forbidden_attributes",
-            "Detects forbidden attribute access"
-        )
         self.forbidden_attributes = forbidden_attributes
     
     def check(self, node: ast.AST) -> List[SecurityViolation]:
@@ -136,8 +120,8 @@ class RegexRule(SecurityRule):
     of AST nodes.
     """
     
-    def __init__(self, name: str, description: str, pattern: str):
-        super().__init__(name, description)
+    def __init__(self, pattern: str, description: Optional[str] = None):
+        self.description = description if description else f"Regex rule: {pattern}"
         try:
             self.pattern = re.compile(pattern, re.MULTILINE | re.DOTALL)
         except re.error as e:
@@ -153,7 +137,7 @@ class RegexRule(SecurityRule):
                 
                 if self.pattern.search(node_str):
                     violations.append(SecurityViolation(
-                        message=f"Security rule '{self.name}': {self.description} {f'at line {node.lineno}' if hasattr(node, 'lineno') else ''}"
+                        message=f"Security rule: {self.description} {f'at line {node.lineno}' if hasattr(node, 'lineno') else ''}"
                     ))
             except Exception:
                 # Don't fail analysis due to string conversion issues
@@ -175,7 +159,7 @@ class SecurityChecker:
         >>>     ImportRule(set(["os", "subprocess", "sys", "shutil", "pathlib", "socket", "urllib", "http", "ctypes", "gc", "csv"])),
         >>>     FunctionRule(set(["eval", "exec", "compile", "open", "input", "raw_input", "exit", "quit", "__import__", "globals", "locals", "breakpoint"])),
         >>>     AttributeRule(set(["__globals__", "__locals__", "__code__", "__closure__", "__defaults__", "__dict__", "__class__", "__bases__", "__mro__", "__subclasses__", "__import__", "__builtins__"])),
-        >>>     RegexRule("forbidden_statements", "Detects forbidden statements", r"delete")
+        >>>     RegexRule("Detects forbidden statements", r"delete")
         >>> ])
         >>> violations = checker.check_code("import os; os.system('ls')")
         >>> print(len(violations))
@@ -190,8 +174,6 @@ class SecurityChecker:
         Args:
             rules: List of security rules
             
-        Raises:
-            ValueError: If rule with same name already exists
         """
         self.rules = []
         for rule in rules:
@@ -203,11 +185,7 @@ class SecurityChecker:
         Args:
             rule: Security rule to add
             
-        Raises:
-            ValueError: If rule with same name already exists
         """
-        if any(r.name == rule.name for r in self.rules):
-            raise ValueError(f"Rule with name '{rule.name}' already exists")
             
         self.rules.append(rule)
     

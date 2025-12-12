@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+"></a>
-  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/pypi-0.6.0-blue.svg" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/pypi-0.6.1-blue.svg" alt="PyPI version"></a>
 </p>
 
 <p align="center">
@@ -19,13 +19,13 @@ Traditional LLM agents operate under a **text-in-text-out** paradigm, with tool 
 
 ## Why CaveAgent?
 
-- 🧠 **Native Code Generation** - LLMs excel at writing code, not parsing JSON
-- ⚡ **Fewer Iterations** - Execute complex multi-step workflows in a single turn
-- 🔄 **Persistent State** — DataFrames, graphs, and objects survive across turns
-- 🎯 **Maximum Flexibility** - Handle dynamic workflows that JSON schemas can't express
-- 🛡️ **Secure by Design** - AST validation prevents dangerous code execution
-- 📡 **Real-time Streaming** - Watch your AI think and execute in real-time
-- 🌐 **Universal LLM Support** - Works with OpenAI, Anthropic, Google, and 100+ providers
+- **Native Code Generation** - LLMs excel at writing code, not parsing JSON
+- **Fewer Iterations** - Execute complex multi-step workflows in a single turn
+- **Persistent State** — DataFrames, graphs, and objects survive across turns
+- **Maximum Flexibility** - Handle dynamic workflows that JSON schemas can't express
+- **Secure by Design** - AST validation prevents dangerous code execution
+- **Real-time Streaming** - Watch your AI think and execute in real-time
+- **Universal LLM Support** - Works with OpenAI, Anthropic, Google, and 100+ providers
 
 ## Quick Start
 
@@ -197,9 +197,9 @@ Watch your AI think and execute code in real-time:
 ```python
 async for event in agent.stream_events("Analyze this data and create a summary"):
     if event.type.value == 'code':
-        print(f"🔧 Executing: {event.content}")
+        print(f"Executing: {event.content}")
     elif event.type.value == 'execution_output':
-        print(f"✅ Result: {event.content}")
+        print(f"Result: {event.content}")
     elif event.type.value == 'text':
         print(event.content, end="", flush=True)
 ```
@@ -297,19 +297,19 @@ Light:
 
 ## Key Features
 
-- **🤖 Code-Based Function Calling**: Leverages LLM's natural coding abilities instead of rigid JSON schemas
-- **🛡️ Secure Runtime Environment**:
+- **Code-Based Function Calling**: Leverages LLM's natural coding abilities instead of rigid JSON schemas
+- **Secure Runtime Environment**:
   - Inject Python objects, variables, and functions as tools
   - Rule-based security validation prevents dangerous code execution
   - Flexible security rules: ImportRule, FunctionRule, AttributeRule, RegexRule
   - Customizable security policies for different use cases
   - Access execution results and maintain state across interactions
-- **💬 Multi-Turn Conversations**: Persistent context and runtime state across multiple interactions
-- **⚡ Streaming & Async**: Real-time event streaming and full async/await support for optimal performance
-- **🛡️ Execution Control**: Configurable step limits and error handling to prevent infinite loops
-- **🎯 Unmatched Flexibility**: JSON schemas break with dynamic workflows. Python code adapts to any situation - conditional logic, loops, and complex data transformations.
-- **🌐 Flexible LLM Support**: Works with any LLM provider via OpenAI-compatible APIs or LiteLLM
-- **📋 Type Injection**: Auto-inject types for `isinstance()` checks; explicit Type injection to expose schemas to the LLM
+- **Multi-Turn Conversations**: Persistent context and runtime state across multiple interactions
+- **Streaming & Async**: Real-time event streaming and full async/await support for optimal performance
+- **Execution Control**: Configurable step limits and error handling to prevent infinite loops
+- **Unmatched Flexibility**: JSON schemas break with dynamic workflows. Python code adapts to any situation - conditional logic, loops, and complex data transformations.
+- **Flexible LLM Support**: Works with any LLM provider via OpenAI-compatible APIs or LiteLLM
+- **Type Injection**: Auto-inject types for `isinstance()` checks; explicit Type injection to expose schemas to the LLM
 
 ## Real-World Examples
 

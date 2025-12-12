@@ -1,7 +1,7 @@
 from .prompts import DEFAULT_SYSTEM_PROMPT, EXECUTION_OUTPUT_PROMPT, DEFAULT_INSTRUCTIONS, DEFAULT_AGENT_IDENTITY, DEFAULT_ADDITIONAL_CONTEXT, EXECUTION_OUTPUT_EXCEEDED_PROMPT, SECURITY_ERROR_PROMPT
 from .python_runtime import PythonRuntime, SecurityError
 from typing import List, Dict, Any, AsyncGenerator, Optional
-from .models import Model
+from .models import Model, TokenUsage
 from rich.console import Console
 from rich.text import Text
 from rich.style import Style
@@ -29,10 +29,10 @@ class Message():
     def __init__(self, content: str, role: MessageRole):
         self.content = content
         self.role = role
-        
+
     def to_dict(self) -> Dict[str, str]:
         return {"role": self.role, "content": self.content}
-    
+
 class SystemMessage(Message):
     """System message that provides instructions to the LLM."""
     def __init__(self, content: str):
@@ -77,8 +77,8 @@ class EventType(Enum):
 class Logger:
     """
     A structured logger for Agent that provides leveled logging with rich formatting.
-    
-    Handles different types of log messages (debug, info, error) with customizable 
+
+    Handles different types of log messages (debug, info, error) with customizable
     styling and visibility levels. Uses rich library for enhanced console output.
 
     Log Levels:
@@ -96,13 +96,13 @@ class Logger:
             LogLevel.INFO: Style(color="bright_blue", bold=False),
             LogLevel.ERROR: Style(color="bright_red", bold=True)
         }
-        
+
         self.level_prefix = {
             LogLevel.DEBUG: "DEBUG",
             LogLevel.INFO: "INFO",
             LogLevel.ERROR: "ERROR"
         }
-    
+
     def __log(self, title: str, content: Any, style: str, level: LogLevel = LogLevel.INFO):
         if level <= self.level:
             # Create composite log message with improved formatting
@@ -110,10 +110,10 @@ class Logger:
 
             # Add log level indicator
             message.append(f"[{self.level_prefix[level]}] ", self.level_styles[level])
-            
+
             style = Style.parse(style)
             message.append(f"{title}: \n", style)
-            
+
             message.append(content, style)
 
             self.console.print(message)
@@ -136,35 +136,41 @@ class ContextState(IntEnum):
 
 class ExecutionContext:
     """Manages execution state with max steps limit."""
-    
+
     def __init__(self, max_steps: int = 10):
         self.max_steps = max_steps
         self.code_snippets = []
         self.total_steps = 0
         self.state = ContextState.INITIALIZED
-    
+        self.token_usage = TokenUsage()  # Track token usage
+
     def start(self) -> None:
         """Initialize execution context."""
         self.total_steps = 0
         self.state = ContextState.RUNNING
-    
+        self.token_usage = TokenUsage()
+
     def next_step(self) -> bool:
         """Record a step execution. Returns False if max steps reached."""
         if self.total_steps >= self.max_steps:
             self.state = ContextState.MAX_STEPS_REACHED
             return False
-        
+
         self.total_steps += 1
         return True
-    
+
     def complete(self) -> None:
         """Mark execution as completed successfully."""
         self.state = ContextState.COMPLETED
-    
+
+    def add_token_usage(self, usage: TokenUsage) -> None:
+        """Accumulate token usage from a model call."""
+        self.token_usage = self.token_usage + usage
+
     @property
     def is_running(self) -> bool:
         return self.state == ContextState.RUNNING
-    
+
 class ExecutionStatus(Enum):
     """Status of agent execution."""
     SUCCESS = "success"
@@ -185,16 +191,18 @@ class AgentResponse:
         steps_taken: int = 0,
         max_steps: int = 0,
         code_snippets: Optional[List[str]] = None,
+        token_usage: Optional[TokenUsage] = None,
     ):
         self.content = content
         self.status = status
         self.steps_taken = steps_taken
         self.max_steps = max_steps
         self.code_snippets = code_snippets if code_snippets else []
+        self.token_usage = token_usage if token_usage else TokenUsage()
 
     def __str__(self) -> str:
         """String representation of the response."""
-        return f"AgentResponse(status={self.status.value}, steps={self.steps_taken}/{self.max_steps}, content={self.content})"
+        return f"AgentResponse(status={self.status.value}, steps={self.steps_taken}/{self.max_steps}, tokens={self.token_usage.total_tokens}, content={self.content})"
 
 
 class ExecutionOutcome:
@@ -324,18 +332,20 @@ class CaveAgent:
                     code_snippets=context.code_snippets,
                     status=ExecutionStatus.MAX_STEPS_REACHED,
                     steps_taken=context.total_steps,
-                    max_steps=self.max_steps
+                    max_steps=self.max_steps,
+                    token_usage=context.token_usage
                 )
-            
+
             response = await self._execute_step(context)
-            
+
             if not context.is_running:
                 return AgentResponse(
                     content=response,
                     code_snippets=context.code_snippets,
                     status=ExecutionStatus.SUCCESS,
                     steps_taken=context.total_steps,
-                    max_steps=self.max_steps
+                    max_steps=self.max_steps,
+                    token_usage=context.token_usage
                 )
 
     async def stream_events(self, query: str) -> AsyncGenerator[Event, None]:
@@ -343,7 +353,7 @@ class CaveAgent:
         context = ExecutionContext(self.max_steps)
         context.start()
         self._initialize_conversation(query)
-        
+
         while context.is_running:
             # Check if we can proceed to next step
             if not context.next_step():
@@ -351,34 +361,37 @@ class CaveAgent:
                 self.logger.info("Max steps reached", f"Completed {context.total_steps}/{context.max_steps} steps")
                 yield Event(EventType.MAX_STEPS_REACHED, "Max steps reached")
                 return
-            
+
             async for event in self._stream_step_execution(context):
                 yield event
-                
+
                 if not context.is_running:
                     return
 
     async def _execute_step(self, context: ExecutionContext) -> str:
         """Execute a single step and return result."""
         self._log_step(context)
-        
-        # Get LLM response
+
+        # Get LLM response (now returns ModelResponse with token_usage)
         model_response = await self.model.call(self._prepare_messages())
-            
-        # Process response
-        return await self._process_model_response(model_response, context)
+
+        # Accumulate token usage
+        context.add_token_usage(model_response.token_usage)
+
+        # Process response content
+        return await self._process_model_response(model_response.content, context)
 
     async def _stream_step_execution(self, context: ExecutionContext) -> AsyncGenerator[Event, None]:
         """Execute a single step with streaming output."""
         self._log_step(context)
-        
+
         # Stream LLM response and collect
         chunks = []
         parser = StreamingTextParser(self.python_block_identifier)
 
         async for chunk in self.model.stream(self._prepare_messages()):
             chunks.append(chunk)
-            
+
             # Parse and yield streaming events
             parsed_segments = parser.process_chunk(chunk)
             for segment in parsed_segments:
@@ -391,7 +404,7 @@ class CaveAgent:
 
             if parser.is_first_code_block_completed():
                 break
-        
+
         if not parser.is_first_code_block_completed():
             final_segments = parser.flush()
             for segment in final_segments:
@@ -506,12 +519,12 @@ class CaveAgent:
         execution_outcome = await self._execute_code_snippet(code_snippet, context)
         self.add_message(ExecutionResultMessage(execution_outcome.next_prompt))
         yield Event(execution_outcome.event_type, execution_outcome.event_content)
-                
+
     def _log_step(self, context: ExecutionContext):
         """Log step execution info."""
         self.logger.debug(
-            f"Step {context.total_steps}/{context.max_steps}", 
-            f"Processing...", 
+            f"Step {context.total_steps}/{context.max_steps}",
+            f"Processing...",
             "yellow"
         )
 
@@ -542,31 +555,31 @@ class CaveAgent:
             }
             for message in self.messages
         ]
-    
+
     def add_message(self, message: Message):
         """Add message with automatic history management."""
         self.messages.append(message)
         self.logger.debug("History length", f"Current history length: {len(self.messages)}/{self.max_history}", "yellow")
         self._trim_history()
-    
+
     def _trim_history(self):
         """Trim message history if needed."""
         if len(self.messages) > self.max_history:
             # Always keep system message at index 0
             system_msg = self.messages[0]
-            
+
             # Get all non-system messages
             non_system_messages = self.messages[1:]
-            
+
             # Keep only the most recent (max_history - 1) non-system messages
             max_non_system_messages = self.max_history - 1
-            
+
             if len(non_system_messages) > max_non_system_messages:
                 recent_msgs = non_system_messages[-max_non_system_messages:]
             else:
                 recent_msgs = non_system_messages
-                
+
             # Reconstruct the message list
             self.messages = [system_msg] + recent_msgs
-            
+
             self.logger.debug("History trimmed", f"Trimmed to {len(self.messages)}/{self.max_history} messages", "yellow")
