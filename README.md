@@ -3,29 +3,26 @@
 </p>
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2601.01569"><img src="https://img.shields.io/badge/arXiv-2601.01569-b31b1b.svg" alt="arXiv"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+"></a>
-  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/pypi-0.6.1-blue.svg" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/pypi-0.6.2-blue.svg" alt="PyPI version"></a>
 </p>
 
 <p align="center">
-  <em>"When your AI needs to run code, not just write it"</em>
+  <em>"From text-in-text-out to (text&amp;object)-in-(text&amp;object)-out"</em>
 </p>
 
 ---
 
-Traditional LLM agents operate under a **text-in-text-out** paradigm, with tool interactions constrained to JSON primitives. CaveAgent breaks this limitation by natively accepting, manipulating, and outputting complex Python objects—such as `DataFrames`, `ndarrays`, and custom instances—within a persistent runtime, enabling **precise computation** and **lossless data flow** across multi-turn interactions.
+Most LLM agents operate under a text-in-text-out paradigm, with tool interactions constrained to JSON primitives. CaveAgent breaks this with **Stateful Runtime Management**—a persistent Python runtime with direct **variable injection and retrieval**:
+
+- **Inject** any Python object into the runtime—DataFrames, models, database connections, custom class instances—as first-class variables the LLM can manipulate
+- **Persist** state across turns without serialization; objects live in the runtime, not in the context window
+- **Retrieve** manipulated objects back as native Python types for downstream
 
 
-## Why CaveAgent?
-
-- **Native Code Generation** - LLMs excel at writing code, not parsing JSON
-- **Fewer Iterations** - Execute complex multi-step workflows in a single turn
-- **Persistent State** — DataFrames, graphs, and objects survive across turns
-- **Maximum Flexibility** - Handle dynamic workflows that JSON schemas can't express
-- **Secure by Design** - AST validation prevents dangerous code execution
-- **Real-time Streaming** - Watch your AI think and execute in real-time
-- **Universal LLM Support** - Works with OpenAI, Anthropic, Google, and 100+ providers
+**Paper**: [CaveAgent: Transforming LLMs into Stateful Runtime Operators](https://arxiv.org/abs/2601.01569) (Jan 2026)
 
 ## Quick Start
 
@@ -43,13 +40,15 @@ pip install 'cave-agent[openai]'
 pip install 'cave-agent[litellm]'
 ```
 
+## Examples
+
 ### Simple Function Calling
 
 ```python
 import asyncio
 from cave_agent import CaveAgent
 from cave_agent.models import OpenAIServerModel
-from cave_agent.python_runtime import PythonRuntime, Function, Variable
+from cave_agent.runtime import PythonRuntime, Function, Variable
 
 async def main():
     # Initialize LLM model
@@ -95,10 +94,10 @@ async def main():
     agent = CaveAgent(model, runtime=runtime)
 
     await agent.run("Add buy groceries and call mom to my tasks")
-    print(f"Current tasks: {runtime.get_variable('tasks')}")
+    print(f"Current tasks: {runtime.retrieve('tasks')}")
 
     await agent.run("Mark groceries done and remind me about mom")
-    print(f"Final state: {runtime.get_variable('tasks')}")
+    print(f"Final state: {runtime.retrieve('tasks')}")
 
     response = await agent.run("What's my progress?")
     print(response.content)
@@ -107,13 +106,13 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-### Advanced: Stateful Object Interactions
+### Stateful Object Interactions
 
 ```python
 import asyncio
 from cave_agent import CaveAgent
 from cave_agent.models import LiteLLMModel
-from cave_agent.python_runtime import PythonRuntime, Variable, Type
+from cave_agent.runtime import PythonRuntime, Variable, Type
 
 async def main():
     # Initialize LLM model
@@ -180,8 +179,8 @@ async def main():
     await agent.run("Dim the living room light to 20% and set thermostat to 22°C")
 
     # Validate the changes by getting variables from runtime
-    light = runtime.get_variable("living_room_light")
-    thermostat = runtime.get_variable("thermostat")
+    light = runtime.retrieve("living_room_light")
+    thermostat = runtime.retrieve("thermostat")
 
     print(f"Living room light: {light.brightness}% brightness, {'ON' if light.is_on else 'OFF'}")
     print(f"Thermostat: {thermostat.target_temp}°C")
@@ -189,6 +188,32 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+### Multi-Agent Coordination
+
+```python
+# Sub-agents with their own runtimes
+cleaner_agent = CaveAgent(model, runtime=PythonRuntime(variables=[
+    Variable("data", [], "Input"), Variable("cleaned_data", [], "Output"),
+]))
+
+analyzer_agent = CaveAgent(model, runtime=PythonRuntime(variables=[
+    Variable("data", [], "Input"), Variable("insights", {}, "Output"),
+]))
+
+# Orchestrator controls sub-agents as first-class objects
+orchestrator = CaveAgent(model, runtime=PythonRuntime(variables=[
+    Variable("raw_data", raw_data, "Raw dataset"),
+    Variable("cleaner", cleaner_agent, "Cleaner agent"),
+    Variable("analyzer", analyzer_agent, "Analyzer agent"),
+]))
+
+# Inject → trigger → retrieve
+await orchestrator.run("Clean raw_data using cleaner, then analyze using analyzer")
+insights = analyzer.runtime.retrieve("insights")
+```
+
+See [examples/multi_agent.py](examples/multi_agent.py) for a complete example.
 
 ### Real-time Streaming
 
@@ -212,8 +237,8 @@ CaveAgent includes rule-based security to prevent dangerous code execution:
 import asyncio
 from cave_agent import CaveAgent
 from cave_agent.models import OpenAIServerModel
-from cave_agent.python_runtime import PythonRuntime
-from cave_agent.security_checker import (
+from cave_agent.runtime import PythonRuntime
+from cave_agent.security import (
     SecurityChecker, ImportRule, FunctionRule, AttributeRule, RegexRule
 )
 
@@ -229,7 +254,7 @@ async def main():
         ImportRule({"os", "subprocess", "sys", "socket"}),  # Block dangerous imports
         FunctionRule({"eval", "exec", "compile", "open"}),  # Block dangerous functions
         AttributeRule({"__globals__", "__builtins__"}),     # Block attribute access
-        RegexRule("no_print", "Block print statements", r"print\s*\(")  # Custom regex
+        RegexRule(r"print\s*\(", "Block print statements")  # Custom regex
     ]
     
     checker = SecurityChecker(rules)
@@ -249,12 +274,10 @@ if __name__ == "__main__":
 
 ### Type Injection
 
-Types from Variables and Functions are automatically injected into the runtime namespace, allowing the LLM to use `isinstance()` checks and create new instances. By default, type schemas are hidden from the prompt.
-
 To expose type information to the LLM, use explicit `Type` injection:
 
 ```python
-from cave_agent.python_runtime import PythonRuntime, Variable, Type
+from cave_agent.runtime import PythonRuntime, Variable, Type
 
 class Light:
     """A smart light device."""
@@ -284,18 +307,31 @@ runtime = PythonRuntime(
 )
 ```
 
-When enabled, types appear in a dedicated `<types>` section:
-```
-<types>
-Light:
-  doc: A smart light device.
-  methods:
-    - turn_on() -> str
-    - turn_off() -> str
-</types>
-```
+### More Examples
 
-## Key Features
+For more examples, check out the [examples](examples) directory:
+
+- [Basic Usage](examples/basic_usage.py): Simple function calling and object processing
+- [Runtime State](examples/runtime_state.py): Managing runtime state across interactions
+- [Object Methods](examples/object_methods.py): Using class methods and complex objects
+- [Multi-Turn](examples/multi_turn.py): Complex analysis conversations with state persistence
+- [Multi-Agent](examples/multi_agent.py): Data processing pipeline with multiple agents
+- [Stream](examples/stream.py): Streaming responses and execution events
+
+## Multi-Agent Coordination
+
+CaveAgent introduces three foundational innovations for multi-agent coordination:
+
+### Meta-Agent Runtime Control
+Sub-agents are injected as first-class objects into an orchestrator's runtime. The orchestrator programmatically sets variables in sub-agent runtimes, triggers execution, and retrieves results—enabling adaptive pipelines, iterative loops, and conditional branching.
+
+### State-Mediated Communication
+Inter-agent data transfer bypasses message-passing entirely. Agents communicate through direct runtime variable injection—DataFrames, trained models, statistical analyses—preserving type fidelity without serialization loss.
+
+### Shared-Runtime Synchronization
+Multiple agents can operate on a unified runtime instance. When one agent modifies a shared object, all peers perceive the change immediately through direct reference. Zero coordination overhead.
+
+## Features
 
 - **Code-Based Function Calling**: Leverages LLM's natural coding abilities instead of rigid JSON schemas
 - **Secure Runtime Environment**:
@@ -304,22 +340,11 @@ Light:
   - Flexible security rules: ImportRule, FunctionRule, AttributeRule, RegexRule
   - Customizable security policies for different use cases
   - Access execution results and maintain state across interactions
-- **Multi-Turn Conversations**: Persistent context and runtime state across multiple interactions
+- **Multi-Agent Coordination**: Control sub-agents programmatically through runtime injection and retrieval. Shared runtimes enable instant state synchronization.
 - **Streaming & Async**: Real-time event streaming and full async/await support for optimal performance
 - **Execution Control**: Configurable step limits and error handling to prevent infinite loops
-- **Unmatched Flexibility**: JSON schemas break with dynamic workflows. Python code adapts to any situation - conditional logic, loops, and complex data transformations.
 - **Flexible LLM Support**: Works with any LLM provider via OpenAI-compatible APIs or LiteLLM
-- **Type Injection**: Auto-inject types for `isinstance()` checks; explicit Type injection to expose schemas to the LLM
-
-## Real-World Examples
-
-For more examples, check out the [examples](examples) directory:
-
-- [Basic Usage](examples/basic_usage.py): Simple function calling and object processing
-- [Runtime State](examples/runtime_state.py): Managing runtime state across interactions
-- [Object Methods](examples/object_methods.py): Using class methods and complex objects
-- [Multi-Turn](examples/multi_turn.py): Complex analysis conversations with state persistence
-- [Stream](examples/stream.py): Streaming responses and execution events
+- **Type Injection**: Expose class schemas for type-aware LLM code generation
 
 ## LLM Provider Support
 
@@ -345,7 +370,7 @@ from cave_agent.models import LiteLLMModel
 # OpenAI
 model = LiteLLMModel(
     model_id="gpt-4",
-    api_key="your-api-key"，
+    api_key="your-api-key",
     custom_llm_provider='openai'
 )
 
@@ -368,6 +393,18 @@ model = LiteLLMModel(
 
 Contributions are welcome! Please feel free to submit a PR.
 For more details, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Citation
+
+If you use CaveAgent in your research, please cite:
+```bibtex
+@article{ran2026caveagent,
+  title={CaveAgent: Transforming LLMs into Stateful Runtime Operators},
+  author={Ran, Maohao and Wan, Zhenglin and Lin, Cooper and Zhang, Yanting and others},
+  journal={arXiv preprint arXiv:2601.01569},
+  year={2026}
+}
+```
 
 ## License
 

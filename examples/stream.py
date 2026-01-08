@@ -1,6 +1,6 @@
 from cave_agent import CaveAgent, LogLevel, Logger
 from cave_agent.models import OpenAIServerModel
-from cave_agent.python_runtime import PythonRuntime, Variable, Type
+from cave_agent.runtime import PythonRuntime, Variable, Type
 import os
 import asyncio
 from rich.syntax import Syntax
@@ -81,9 +81,9 @@ async def main():
     
     print("\n")
     logger.info("Runtime State", str({
-        'processor': agent.runtime.get_variable('processor'),
-        'numbers': agent.runtime.get_variable('numbers'),
-        'result': agent.runtime.get_variable('result')
+        'processor': agent.runtime.retrieve('processor'),
+        'numbers': agent.runtime.retrieve('numbers'),
+        'result': agent.runtime.retrieve('result')
     }), 'yellow')
 
 if __name__ == "__main__":

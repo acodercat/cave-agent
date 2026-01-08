@@ -1,6 +1,6 @@
 from cave_agent import CaveAgent
 from cave_agent.models import OpenAIServerModel
-from cave_agent.python_runtime import PythonRuntime, Variable
+from cave_agent.runtime import PythonRuntime, Variable
 from dataclasses import dataclass
 import os
 import asyncio
@@ -73,12 +73,12 @@ async def main():
 
     # Process data
     await agent.run("Use processor to sort and deduplicate numbers")
-    processed_data = agent.runtime.get_variable('processed_data')
+    processed_data = agent.runtime.retrieve('processed_data')
     print("Processed data:", processed_data)
 
     # Filter data
     await agent.run("Filter numbers greater than 4")
-    filtered_data = agent.runtime.get_variable('filtered_data')
+    filtered_data = agent.runtime.retrieve('filtered_data')
     print("Filtered data:", filtered_data)
 
 if __name__ == "__main__":

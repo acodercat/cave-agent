@@ -1,6 +1,6 @@
 from cave_agent import CaveAgent
 from cave_agent.models import LiteLLMModel
-from cave_agent.python_runtime import PythonRuntime, Function, Variable, Type
+from cave_agent.runtime import PythonRuntime, Function, Variable, Type
 import os
 import asyncio
 
@@ -95,7 +95,7 @@ async def main():
     print("Response:", response)
     
     # Retrieve results from Python environment
-    sorted_result = agent2.runtime.get_variable('result')
+    sorted_result = agent2.runtime.retrieve('result')
     print("Sorted result:", sorted_result)  # [1, 1, 3, 4, 5, 9]
     
     print("\n=== usage 3: Streaming Events ===")

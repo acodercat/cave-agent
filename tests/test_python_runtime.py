@@ -1,7 +1,7 @@
 import pytest
 from dataclasses import dataclass
 from enum import Enum
-from cave_agent.python_runtime import PythonRuntime, Variable, Function, Type
+from cave_agent.runtime import PythonRuntime, Variable, Function, Type
 
 
 @pytest.fixture
@@ -54,7 +54,7 @@ async def test_print_output(simple_runtime):
 async def test_variable_usage(runtime_with_data):
     """Test using injected variables"""
     await runtime_with_data.execute("result = sum(numbers)")
-    total = runtime_with_data.get_variable('result')
+    total = runtime_with_data.retrieve('result')
     assert total == 36
 
 

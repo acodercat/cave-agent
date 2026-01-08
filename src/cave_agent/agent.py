@@ -1,15 +1,17 @@
 from .prompts import DEFAULT_SYSTEM_PROMPT, EXECUTION_OUTPUT_PROMPT, DEFAULT_INSTRUCTIONS, DEFAULT_AGENT_IDENTITY, DEFAULT_ADDITIONAL_CONTEXT, EXECUTION_OUTPUT_EXCEEDED_PROMPT, SECURITY_ERROR_PROMPT
-from .python_runtime import PythonRuntime, SecurityError
+from .runtime import PythonRuntime
+from .security import SecurityError
 from typing import List, Dict, Any, AsyncGenerator, Optional
 from .models import Model, TokenUsage
 from rich.console import Console
 from rich.text import Text
 from rich.style import Style
 from .utils import extract_python_code
-from .streaming_text_parser import SegmentType, StreamingTextParser
+from .parsing import SegmentType, StreamingTextParser
 from enum import Enum, IntEnum
 from datetime import datetime
-from .constant import DEFAULT_PYTHON_BLOCK_IDENTIFIER
+
+DEFAULT_PYTHON_BLOCK_IDENTIFIER = "python"
 
 class MessageRole(str, Enum):
     SYSTEM = "system"

@@ -1,7 +1,7 @@
 import pytest
 from dataclasses import dataclass
 from cave_agent import CaveAgent
-from cave_agent.python_runtime import PythonRuntime, Variable
+from cave_agent.runtime import PythonRuntime, Variable
 
 @dataclass
 class DataProcessor:
@@ -71,7 +71,7 @@ def object_agent(model, processor, numbers):
 @pytest.mark.asyncio
 async def test_process_and_deduplicate(object_agent):
     await object_agent.run("Use processor to sort and deduplicate numbers")
-    processed_data = object_agent.runtime.get_variable('processed_data')
+    processed_data = object_agent.runtime.retrieve('processed_data')
     expected = [1, 2, 3, 4, 5, 6, 9]
     assert sorted(set(processed_data)) == sorted(set(expected))
     
@@ -79,6 +79,6 @@ async def test_process_and_deduplicate(object_agent):
 @pytest.mark.asyncio
 async def test_filter_numbers(object_agent):
     await object_agent.run("Filter numbers greater than 4")
-    filtered_data = object_agent.runtime.get_variable('filtered_data')
+    filtered_data = object_agent.runtime.retrieve('filtered_data')
     expected = [5, 6, 9]
     assert sorted(set(filtered_data)) == sorted(set(expected))
