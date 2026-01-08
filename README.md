@@ -24,6 +24,14 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 
 **Paper**: [CaveAgent: Transforming LLMs into Stateful Runtime Operators](https://arxiv.org/abs/2601.01569) (Jan 2026)
 
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Examples](#examples)
+- [Multi-Agent Coordination](#multi-agent-coordination)
+- [Features](#features)
+- [LLM Provider Support](#llm-provider-support)
+
 ## Quick Start
 
 ```bash
