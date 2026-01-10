@@ -30,6 +30,7 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 - [Examples](#examples)
 - [Multi-Agent Coordination](#multi-agent-coordination)
 - [Features](#features)
+- [Configuration](#configuration)
 - [LLM Provider Support](#llm-provider-support)
 
 ## Quick Start
@@ -353,6 +354,23 @@ Multiple agents can operate on a unified runtime instance. When one agent modifi
 - **Execution Control**: Configurable step limits and error handling to prevent infinite loops
 - **Flexible LLM Support**: Works with any LLM provider via OpenAI-compatible APIs or LiteLLM
 - **Type Injection**: Expose class schemas for type-aware LLM code generation
+
+## Configuration
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | `Model` | required | LLM model instance (OpenAIServerModel or LiteLLMModel) |
+| `runtime` | `PythonRuntime` | `None` | Python runtime with variables, functions, and types |
+| `max_steps` | `int` | `5` | Maximum execution steps per run |
+| `max_history` | `int` | `10` | Maximum conversation history length |
+| `max_execution_result_length` | `int` | `3000` | Max characters in execution output |
+| `agent_identity` | `str` | default | Agent's role/identity description |
+| `instructions` | `str` | default | Task instructions for the agent |
+| `additional_context` | `str` | default | Extra context information |
+| `system_prompt_template` | `str` | default | Custom system prompt template |
+| `python_block_identifier` | `str` | `"python"` | Code block language identifier |
+| `messages` | `List[Message]` | `None` | Initial message history |
+| `log_level` | `LogLevel` | `DEBUG` | Logging verbosity level |
 
 ## LLM Provider Support
 
