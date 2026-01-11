@@ -30,6 +30,7 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 - [Examples](#examples)
 - [Multi-Agent Coordination](#multi-agent-coordination)
 - [Features](#features)
+- [Awesome Blogs](#awesome-blogs)
 - [Configuration](#configuration)
 - [LLM Provider Support](#llm-provider-support)
 
@@ -354,6 +355,16 @@ Multiple agents can operate on a unified runtime instance. When one agent modifi
 - **Execution Control**: Configurable step limits and error handling to prevent infinite loops
 - **Flexible LLM Support**: Works with any LLM provider via OpenAI-compatible APIs or LiteLLM
 - **Type Injection**: Expose class schemas for type-aware LLM code generation
+
+
+## Awesome Blogs
+
+We thank these community to post our work.
+
+- [CaveAgent让LLM学会了“跑代码”，你能把Agent变成Jupyter里的“老司机”](https://mp.weixin.qq.com/s/cJQ8ki0gXSmcbTPaBBfT5g)
+- [Token消耗减半性能满分！状态化运行时管理能力让智能体性能飞升](https://mp.weixin.qq.com/s/qfVl3ATO4ueDdPb4npmTXQ)
+- [Stateful environment to LLMs](https://x.com/rosinality/status/2008434433972728264)
+- [TEKTA-AI](https://www.tekta.ai/ai-research-papers/caveagent-stateful-llm-runtime-2025)
 
 ## Configuration
 
