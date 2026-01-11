@@ -1,6 +1,6 @@
 from cave_agent import CaveAgent
 from cave_agent.models import LiteLLMModel
-from cave_agent.python_runtime import PythonRuntime, Function, Variable
+from cave_agent.runtime import PythonRuntime, Function, Variable, Type
 import os
 import asyncio
 
@@ -78,11 +78,13 @@ async def main():
         name="result",
         description="Store the result of the processing in this variable. \n usage: print(result)  # Access the result directly"
     )
+
     
     # Create runtime with functions and variables
     runtime2 = PythonRuntime(
         functions=[calc_sum_func],
-        variables=[processor_var, numbers_var, result_var]
+        variables=[processor_var, numbers_var, result_var],
+        types=[Type(DataProcessor)]
     )
     
     # Create agent
@@ -93,7 +95,7 @@ async def main():
     print("Response:", response)
     
     # Retrieve results from Python environment
-    sorted_result = agent2.runtime.get_variable_value('result')
+    sorted_result = agent2.runtime.retrieve('result')
     print("Sorted result:", sorted_result)  # [1, 1, 3, 4, 5, 9]
     
     print("\n=== usage 3: Streaming Events ===")

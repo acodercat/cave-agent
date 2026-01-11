@@ -1,5 +1,5 @@
 from cave_agent import CaveAgent
-from cave_agent.python_runtime import PythonRuntime, Function
+from cave_agent.runtime import PythonRuntime, Function
 import pytest
 
 @pytest.fixture

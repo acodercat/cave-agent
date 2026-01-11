@@ -1,6 +1,6 @@
 import pytest
 from cave_agent import CaveAgent
-from cave_agent.python_runtime import PythonRuntime, Variable
+from cave_agent.runtime import PythonRuntime, Variable
 
 class DataAnalyzer:
     """A data analyzer that provides statistical analysis for numerical data."""
@@ -55,7 +55,7 @@ def multi_turn_agent(model, analyzer, numbers):
 @pytest.mark.asyncio
 async def test_basic_analysis(multi_turn_agent):
     await multi_turn_agent.run("Analyze the numbers and store results in 'stats'")
-    stats = multi_turn_agent.runtime.get_variable_value('stats')
+    stats = multi_turn_agent.runtime.retrieve('stats')
     
     assert stats['min'] == 1
     assert stats['max'] == 9
@@ -66,7 +66,7 @@ async def test_basic_analysis(multi_turn_agent):
 async def test_multi_turn_conversation(multi_turn_agent):
     # First turn
     await multi_turn_agent.run("Analyze the numbers and store results in 'stats'")
-    stats = multi_turn_agent.runtime.get_variable_value('stats')
+    stats = multi_turn_agent.runtime.retrieve('stats')
     assert stats is not None
     assert all(k in stats for k in ['min', 'max', 'avg', 'len'])
     

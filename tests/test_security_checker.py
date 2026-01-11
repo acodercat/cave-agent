@@ -1,9 +1,9 @@
 import pytest
 
-from cave_agent.security_checker import (
+from cave_agent.security import (
     SecurityChecker, SecurityError, ImportRule, FunctionRule, AttributeRule, RegexRule
 )
-from cave_agent.python_runtime import PythonRuntime, PythonExecutor
+from cave_agent.runtime import PythonRuntime, PythonExecutor
 
 
 class TestSecurityChecker:
@@ -22,19 +22,6 @@ class TestSecurityChecker:
         # Test empty initialization
         empty_checker = SecurityChecker([])
         assert len(empty_checker.rules) == 0
-    
-    def test_add_rule(self):
-        """Test adding rules to SecurityChecker."""
-        checker = SecurityChecker([])
-        
-        rule = ImportRule({"os"})
-        checker.add_rule(rule)
-        assert len(checker.rules) == 1
-        
-        # Test duplicate rule name should raise error
-        duplicate_rule = ImportRule({"sys"})  # Same name "forbidden_imports"
-        with pytest.raises(ValueError):
-            checker.add_rule(duplicate_rule)
     
     def test_import_rule(self):
         """Test ImportRule detection."""
@@ -104,14 +91,14 @@ class TestSecurityChecker:
     
     def test_regex_rule(self):
         """Test RegexRule functionality."""
-        rule = RegexRule("no_print", "Block print statements", r"print\s*\(")
+        rule = RegexRule(r"print\s*\(", "Block print statements")
         checker = SecurityChecker([rule])
         
         # Test pattern matching
         code = "print('hello world')"
         violations = checker.check_code(code)
         assert len(violations) > 0
-        assert "no_print" in violations[0].message
+        assert "Block print statements" in violations[0].message
         
         # Test safe code
         safe_code = "x = 5 + 3"
@@ -122,7 +109,7 @@ class TestSecurityChecker:
         """Test RegexRule parameter validation."""
         # Test invalid regex pattern
         with pytest.raises(ValueError):
-            RegexRule("bad_pattern", "Bad regex", "[unclosed")
+            RegexRule("[unclosed", "Bad regex")
     
     def test_multiple_rules(self):
         """Test SecurityChecker with multiple rules."""
@@ -130,7 +117,7 @@ class TestSecurityChecker:
             ImportRule({"os"}),
             FunctionRule({"eval"}),
             AttributeRule({"__globals__"}),
-            RegexRule("no_print", "Block print statements", r"print\s*\(")
+            RegexRule(r"print\s*\(", "Block print statements")
         ]
         checker = SecurityChecker(rules)
         
@@ -229,7 +216,7 @@ class TestPythonRuntimeSecurity:
     async def test_runtime_regex_rule_security_rules(self):
         """Test adding regex security rules to runtime."""
         # RegexRule only works on expressions, so test with a print statement
-        regex_rule = RegexRule("no_print", "Disallow print statements", r"print\s*\(")
+        regex_rule = RegexRule(r"print\s*\(", "Disallow print statements")
         checker = SecurityChecker([regex_rule])
         runtime = PythonRuntime(security_checker=checker)
         
@@ -287,7 +274,7 @@ class TestSecurityIntegration:
             ImportRule({"os", "subprocess", "sys", "shutil", "socket", "urllib"}),
             FunctionRule({"eval", "exec", "compile", "open", "__import__", "globals", "locals"}),
             AttributeRule({"__globals__", "__locals__", "__code__", "__builtins__"}),
-            RegexRule("no_print", "Block print statements", r"print\s*\(")
+            RegexRule(r"print\s*\(", "Block print statements")
         ]
         checker = SecurityChecker(rules)
         

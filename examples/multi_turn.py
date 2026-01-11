@@ -1,6 +1,6 @@
 from cave_agent import CaveAgent
 from cave_agent.models import OpenAIServerModel
-from cave_agent.python_runtime import PythonRuntime, Variable
+from cave_agent.runtime import PythonRuntime, Variable, Type
 import os
 import asyncio
 
@@ -61,7 +61,8 @@ async def main():
 
     # Create runtime with variables
     runtime = PythonRuntime(
-        variables=[analyzer_var, numbers_var, stats_var]
+        variables=[analyzer_var, numbers_var, stats_var],
+        types=[Type(DataAnalyzer)]
     )
 
     # Create agent
@@ -72,7 +73,7 @@ async def main():
 
     # First turn - get basic stats
     await agent.run("Analyze the numbers and store the results in 'stats'")
-    stats = agent.runtime.get_variable_value('stats')
+    stats = agent.runtime.retrieve('stats')
     print("\nBasic stats:", stats)
 
     # Second turn - ask about specific stat

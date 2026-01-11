@@ -1,4 +1,3 @@
-import re
 from typing import Union
 
 def extract_python_code(response, python_block_identifier: str) -> Union[str, None]:

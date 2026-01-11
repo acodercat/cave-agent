@@ -1,4 +1,4 @@
-from cave_agent.streaming_text_parser import StreamingTextParser, SegmentType, Segment
+from cave_agent.parsing import StreamingTextParser, SegmentType, Segment
 
 
 class TestStreamingTextParser:
