@@ -67,7 +67,11 @@ class Function:
         self.func = func
         self.description = description
         self.name = func.__name__
-        self.signature = f"{self.name}{inspect.signature(func)}"
+        self.is_async = inspect.iscoroutinefunction(func)
+
+        # Include 'async' prefix for async functions so LLM knows to use await
+        prefix = "async " if self.is_async else ""
+        self.signature = f"{prefix}{self.name}{inspect.signature(func)}"
         self.doc: Optional[str] = None
 
         if include_doc and hasattr(func, "__doc__") and func.__doc__:
