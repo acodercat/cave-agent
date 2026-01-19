@@ -1,11 +1,10 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, List, Any
 import re
 import importlib.util
-from ..runtime import Function, Variable, Type, PythonRuntime
-from .constants import INJECTION_FILENAME, SCRIPTS_DIR, REFERENCES_DIR, ASSETS_DIR
-from .script import ScriptRunner
+from ..runtime import Function, Variable, Type
+from .constants import INJECTION_FILENAME
 
 
 class SkillInjectionError(Exception):
@@ -43,7 +42,6 @@ class Skill:
     path: Path
     _body_content: Optional[str] = field(default=None, repr=False)
     _injection: Optional[SkillInjection] = field(default=None, repr=False)
-    _script_runner: Optional[ScriptRunner] = field(default=None, repr=False)
 
     @property
     def name(self) -> str:
@@ -71,36 +69,6 @@ class Skill:
     def has_injection(self) -> bool:
         """Check if the skill has an injection module."""
         return self.injection_path.exists()
-
-    @property
-    def scripts_dir(self) -> Path:
-        """Get the path to the skill's scripts directory."""
-        return self.path.parent / SCRIPTS_DIR
-
-    @property
-    def has_scripts(self) -> bool:
-        """Check if the skill has a scripts directory."""
-        return self.scripts_dir.exists() and self.scripts_dir.is_dir()
-
-    @property
-    def references_dir(self) -> Path:
-        """Get the path to the skill's references directory."""
-        return self.path.parent / REFERENCES_DIR
-
-    @property
-    def has_references(self) -> bool:
-        """Check if the skill has a references directory."""
-        return self.references_dir.exists() and self.references_dir.is_dir()
-
-    @property
-    def assets_dir(self) -> Path:
-        """Get the path to the skill's assets directory."""
-        return self.path.parent / ASSETS_DIR
-
-    @property
-    def has_assets(self) -> bool:
-        """Check if the skill has an assets directory."""
-        return self.assets_dir.exists() and self.assets_dir.is_dir()
 
     @property
     def injection(self) -> Optional[SkillInjection]:
@@ -161,82 +129,3 @@ class Skill:
                 types.append(obj)
 
         self._injection = SkillInjection(functions=functions, variables=variables, types=types)
-
-    async def run_script(
-        self,
-        script_name: str,
-        agent_runtime: PythonRuntime,
-        **kwargs
-    ) -> Any:
-        """
-        Run a script from the skill's scripts/ directory.
-
-        The script must define a main() function as its entrypoint.
-        Scripts run in an isolated IPython environment with access to
-        the agent's runtime for retrieving state/data.
-
-        Args:
-            script_name: Script filename (e.g., "analyze.py")
-            agent_runtime: PythonRuntime for scripts to access agent state/data
-            **kwargs: Arguments passed to main()
-
-        Returns:
-            Return value from the script's main() function
-
-        Raises:
-            FileNotFoundError: If scripts directory or script doesn't exist
-            ScriptError: If script execution fails
-            RuntimeError: If skill was not activated via activate_skill()
-        """
-        if self._script_runner is None:
-            raise RuntimeError(f"Skill '{self.name}' was not activated. Call activate_skill() first.")
-
-        if not self.has_scripts:
-            raise FileNotFoundError(f"Skill '{self.name}' has no scripts/ directory")
-
-        script_path = self.scripts_dir / script_name
-        return await self._script_runner.run(script_path, agent_runtime=agent_runtime, **kwargs)
-
-    def read_reference(self, reference_name: str) -> str:
-        """
-        Read a reference document from the skill's references/ directory.
-
-        Args:
-            reference_name: Reference filename (e.g., "GUIDE.md")
-
-        Returns:
-            Content of the reference file
-
-        Raises:
-            FileNotFoundError: If references directory or file doesn't exist
-        """
-        if not self.has_references:
-            raise FileNotFoundError(f"Skill '{self.name}' has no references/ directory")
-
-        ref_path = self.references_dir / reference_name
-        if not ref_path.exists():
-            raise FileNotFoundError(f"Reference '{reference_name}' not found in skill '{self.name}'")
-
-        return ref_path.read_text(encoding="utf-8")
-
-    def read_asset(self, asset_name: str) -> bytes:
-        """
-        Read an asset file from the skill's assets/ directory.
-
-        Args:
-            asset_name: Asset filename (e.g., "template.json", "logo.png")
-
-        Returns:
-            Raw bytes of the asset file
-
-        Raises:
-            FileNotFoundError: If assets directory or file doesn't exist
-        """
-        if not self.has_assets:
-            raise FileNotFoundError(f"Skill '{self.name}' has no assets/ directory")
-
-        asset_path = self.assets_dir / asset_name
-        if not asset_path.exists():
-            raise FileNotFoundError(f"Asset '{asset_name}' not found in skill '{self.name}'")
-
-        return asset_path.read_bytes()

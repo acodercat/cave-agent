@@ -1,6 +1,5 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 from .skill import Skill
-from .script import ScriptRunner
 from ..runtime import PythonRuntime
 
 
@@ -25,7 +24,6 @@ class SkillRegistry:
         """
         self._skills: Dict[str, Skill] = {}
         self._agent_runtime = agent_runtime
-        self._script_runner = ScriptRunner()
 
     def add_skill(self, skill: Skill) -> None:
         """
@@ -99,9 +97,6 @@ class SkillRegistry:
         Print the returned value to see the skill's instructions, then follow
         them to complete the task. Do NOT call again for the same skill.
 
-        Use run_skill_script(), read_skill_reference(), and read_skill_asset()
-        to access the skill's resources.
-
         Args:
             skill_name: The exact name of the skill to activate (from the skills list)
 
@@ -112,9 +107,6 @@ class SkillRegistry:
             KeyError: If skill is not found
         """
         skill = self._get_skill_or_raise(skill_name)
-
-        # Inject script runner for skill methods
-        skill._script_runner = self._script_runner
 
         # Inject skill's exports (functions/variables/types) if available
         if self._agent_runtime and skill.injection:
@@ -137,54 +129,3 @@ class SkillRegistry:
                     pass  # Type already exists
 
         return skill.body_content
-
-    async def run_skill_script(self, skill_name: str, script_name: str, **kwargs) -> Any:
-        """
-        Run a script from a skill's scripts/ directory.
-
-        This is an async function - use `await` when calling:
-            result = await run_skill_script("skill-name", "script.py", arg=value)
-
-        The script must define a main() function as its entrypoint.
-        Scripts run in an isolated IPython environment with access to
-        the agent's runtime for retrieving state/data.
-
-        Args:
-            skill_name: Name of the skill containing the script
-            script_name: Script filename (e.g., "analyze.py")
-            **kwargs: Arguments passed to main()
-
-        Returns:
-            Return value from the script's main() function
-        """
-        skill = self._get_skill_or_raise(skill_name)
-        skill._script_runner = self._script_runner
-        return await skill.run_script(script_name, agent_runtime=self._agent_runtime, **kwargs)
-
-    def read_skill_reference(self, skill_name: str, reference_name: str) -> str:
-        """
-        Read a reference document from a skill's references if needed.
-
-        Args:
-            skill_name: Name of the skill containing the reference
-            reference_name: Reference filename (e.g., "GUIDE.md")
-
-        Returns:
-            Content of the reference file
-        """
-        skill = self._get_skill_or_raise(skill_name)
-        return skill.read_reference(reference_name)
-
-    def read_skill_asset(self, skill_name: str, asset_name: str) -> bytes:
-        """
-        Read an asset file from a skill's assets if needed.
-
-        Args:
-            skill_name: Name of the skill containing the asset
-            asset_name: Asset filename (e.g., "template.json", "logo.png")
-
-        Returns:
-            Raw bytes of the asset file
-        """
-        skill = self._get_skill_or_raise(skill_name)
-        return skill.read_asset(asset_name)

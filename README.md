@@ -2,11 +2,15 @@
   <img src="https://github.com/acodercat/cave-agent/raw/master/banner.png" alt="CaveAgent">
 </p>
 
+<h3 align="center">
+  <b>CaveAgent: Transforming LLMs into Stateful Runtime Operators </b>
+</h3>
+
 <p align="center">
   <a href="https://arxiv.org/abs/2601.01569"><img src="https://img.shields.io/badge/arXiv-Paper-red?style=flat-square&logo=arxiv" alt="arXiv Paper"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat-square" alt="Python 3.11+"></a>
-  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.6.2-blue?style=flat-square" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.6.3-blue?style=flat-square" alt="PyPI version"></a>
 </p>
 
 <p align="center">
@@ -21,17 +25,20 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 - **Persist** state across turns without serialization; objects live in the runtime, not in the context window
 - **Retrieve** manipulated objects back as native Python types for downstream
 
-
-**Paper**: [CaveAgent: Transforming LLMs into Stateful Runtime Operators](https://arxiv.org/abs/2601.01569) (Jan 2026)
-
 ## Table of Contents
 
 - [Quick Start](#quick-start)
 - [Examples](#examples)
+  - [Function Calling](#function-calling)
+  - [Stateful Object Interactions](#stateful-object-interactions)
+  - [Multi-Agent Coordination](#multi-agent-coordination)
+  - [Real-time Streaming](#real-time-streaming)
+  - [Security Rules](#security-rules)
 - [Agent Skills](#agent-skills)
-- [Multi-Agent Coordination](#multi-agent-coordination)
+  - [Creating a Skill](#creating-a-skill)
+  - [Using Skills](#using-skills)
+  - [Injection Module](#injection-module-caveagent-extension)
 - [Features](#features)
-- [Awesome Blogs](#awesome-blogs)
 - [Configuration](#configuration)
 - [LLM Provider Support](#llm-provider-support)
 
@@ -67,7 +74,7 @@ await agent.run("Add 'buy groceries' to my tasks")
 print(runtime.retrieve("tasks"))  # [{'name': 'buy groceries', 'done': False}]
 ```
 
-See [examples/basic_usage.py](examples/basic_usage.py) for complete example.
+See [examples/basic_usage.py](examples/basic_usage.py) for a complete example.
 
 ### Stateful Object Interactions
 
@@ -86,7 +93,7 @@ await agent.run("Dim the light to 20% and set thermostat to 22°C")
 light = runtime.retrieve("light")  # Object with updated state
 ```
 
-See [examples/object_methods.py](examples/object_methods.py) for complete example.
+See [examples/object_methods.py](examples/object_methods.py) for a complete example.
 
 ### Multi-Agent Coordination
 
@@ -112,7 +119,7 @@ await orchestrator.run("Clean raw_data using cleaner, then analyze using analyze
 insights = analyzer.runtime.retrieve("insights")
 ```
 
-See [examples/multi_agent.py](examples/multi_agent.py) for complete example.
+See [examples/multi_agent.py](examples/multi_agent.py) for a complete example.
 
 ### Real-time Streaming
 
@@ -124,7 +131,7 @@ async for event in agent.stream_events("Analyze this data"):
         print(f"Result: {event.content}")
 ```
 
-See [examples/stream.py](examples/stream.py) for complete example.
+See [examples/stream.py](examples/stream.py) for a complete example.
 
 ### Security Rules
 
@@ -149,15 +156,7 @@ runtime = PythonRuntime(security_checker=SecurityChecker(rules))
 
 ## Agent Skills
 
-CaveAgent implements the [Agent Skills](https://agentskills.io) open standard—a portable format for packaging instructions, scripts, and resources that agents can discover and use. Originally developed by Anthropic and now supported across the AI ecosystem (Claude, Gemini CLI, Cursor, VS Code, and more), Skills enable agents to acquire domain expertise on-demand.
-
-**Key benefits**:
-- **Specialize agents**: Package domain-specific workflows and best practices
-- **Reduce repetition**: Create once, use automatically across conversations
-- **Compose capabilities**: Combine Skills to build complex workflows
-- **Interoperability**: Same Skill works across skills-compatible agent products
-
-> For the complete specification, see [Agent Skills Documentation](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview).
+CaveAgent implements the [Agent Skills](https://agentskills.io) open standard—a portable format for packaging instructions that agents can discover and use. Originally developed by Anthropic and now supported across the AI ecosystem (Claude, Gemini CLI, Cursor, VS Code, and more), Skills enable agents to acquire domain expertise on-demand.
 
 ### Creating a Skill
 
@@ -166,10 +165,7 @@ A Skill is a directory containing a `SKILL.md` file with YAML frontmatter:
 ```
 my-skill/
 ├── SKILL.md           # Required: Skill definition and instructions
-├── injection.py       # Optional: Functions/variables/types to inject (CaveAgent extension)
-├── scripts/           # Optional: Executable Python scripts
-├── references/        # Optional: Reference documents
-└── assets/            # Optional: Static assets (JSON, images, etc.)
+└── injection.py       # Optional: Functions/variables/types to inject (CaveAgent extension)
 ```
 
 **SKILL.md** structure:
@@ -183,14 +179,12 @@ description: Process and analyze datasets with statistical methods. Use when wor
 # Data Processing Instructions
 
 ## Quick Start
-Use the provided scripts to analyze datasets...
+Use the injected functions to analyze datasets...
 
 ## Workflows
-1. Load the dataset using the provided scripts
-2. Apply statistical analysis
+1. Activate the skill to load injected functions
+2. Apply statistical analysis using the provided functions
 3. Return structured results
-
-For advanced usage, see [ADVANCED.md](ADVANCED.md).
 ```
 
 **Required fields**: `name` (max 64 chars, lowercase with hyphens) and `description` (max 1024 chars)
@@ -205,7 +199,6 @@ Skills use progressive disclosure to minimize context usage:
 |-------|-------------|---------|
 | **Metadata** | At startup | `name` and `description` from YAML frontmatter (~100 tokens) |
 | **Instructions** | When activated | SKILL.md body with guidance (loaded on-demand) |
-| **Resources** | As needed | Scripts, references, assets (loaded only when referenced) |
 
 ### Using Skills
 
@@ -221,12 +214,7 @@ skill = SkillDiscovery.from_file("./my-skill/SKILL.md")
 agent = CaveAgent(model=model, skills=[skill])
 ```
 
-When skills are loaded, the agent gains access to these runtime functions:
-
-- `activate_skill(skill_name)` - Activate a skill and load its instructions
-- `run_skill_script(skill_name, script_name, **kwargs)` - Run a skill's script
-- `read_skill_reference(skill_name, reference_name)` - Read reference documents
-- `read_skill_asset(skill_name, asset_name)` - Read asset files
+When skills are loaded, the agent gains access to the `activate_skill(skill_name)` runtime function to activate a skill and load its instructions.
 
 ### Injection Module (CaveAgent Extension)
 
@@ -257,48 +245,7 @@ __exports__ = [
 
 When `activate_skill()` is called, these exports are automatically injected into the runtime namespace.
 
-### Skill Scripts
-
-Scripts in the `scripts/` directory can be executed via `run_skill_script()`. Each script must define a `main(runtime, **kwargs)` function with access to the agent's runtime:
-
-```python
-# scripts/process.py
-def main(runtime, data, threshold=0.5):
-    """Process data with the given threshold."""
-    # Access agent's runtime state
-    config = runtime.retrieve("CONFIG")
-
-    # Process and return results
-    filtered = [x for x in data if x > threshold]
-    return {"filtered": filtered, "count": len(filtered)}
-```
-
-Scripts support both sync and async main functions:
-
-```python
-# scripts/fetch.py
-async def main(runtime, url):
-    """Async script for fetching data."""
-    import aiohttp
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            return await response.json()
-```
-
 See [examples/skill_data_processor.py](examples/skill_data_processor.py) for a complete example.
-
-## Multi-Agent Coordination
-
-CaveAgent introduces three foundational innovations for multi-agent coordination:
-
-### Meta-Agent Runtime Control
-Sub-agents are injected as first-class objects into an orchestrator's runtime. The orchestrator programmatically sets variables in sub-agent runtimes, triggers execution, and retrieves results—enabling adaptive pipelines, iterative loops, and conditional branching.
-
-### State-Mediated Communication
-Inter-agent data transfer bypasses message-passing entirely. Agents communicate through direct runtime variable injection—DataFrames, trained models, statistical analyses—preserving type fidelity without serialization loss.
-
-### Shared-Runtime Synchronization
-Multiple agents can operate on a unified runtime instance. When one agent modifies a shared object, all peers perceive the change immediately through direct reference. Zero coordination overhead.
 
 ## Features
 
@@ -309,7 +256,7 @@ Multiple agents can operate on a unified runtime instance. When one agent modifi
   - Flexible security rules: ImportRule, FunctionRule, AttributeRule, RegexRule
   - Customizable security policies for different use cases
   - Access execution results and maintain state across interactions
-- **[Agent Skills](https://agentskills.io)**: Implements the open Agent Skills standard for modular, portable instruction packages. Skills bundle instructions, scripts, and resources that agents load on-demand. CaveAgent extends the standard with runtime injection (`injection.py`).
+- **[Agent Skills](https://agentskills.io)**: Implements the open Agent Skills standard for modular, portable instruction packages. CaveAgent extends the standard with runtime injection (`injection.py`).
 - **Multi-Agent Coordination**: Control sub-agents programmatically through runtime injection and retrieval. Shared runtimes enable instant state synchronization.
 - **Streaming & Async**: Real-time event streaming and full async/await support for optimal performance
 - **Execution Control**: Configurable step limits and error handling to prevent infinite loops
@@ -407,4 +354,4 @@ If you use CaveAgent in your research, please cite:
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License

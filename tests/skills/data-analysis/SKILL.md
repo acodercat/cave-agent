@@ -15,9 +15,7 @@ Statistical analysis, outlier detection, and data transformation.
 ## Quick Start
 
 1. Use `calculate_stats(data)` to compute statistics
-2. Use `run_skill_script("data-analysis", "analyze.py", data=[...])` to run analysis
-3. Use `read_skill_reference("data-analysis", "GUIDE.md")` for detailed guide
-4. Use `read_skill_asset("data-analysis", "config.json")` for configuration
+2. Use `find_outliers(data, threshold)` to find outliers
 
 ## Available Functions
 
@@ -26,19 +24,3 @@ After activating this skill, you have access to:
 - `find_outliers(data: List[float], threshold: float)` - Find outliers using IQR
 - `DATA_CONFIG` variable - Configuration dictionary
 - `DataPoint` type - Dataclass for structured data
-
-## Scripts
-
-- `analyze.py` - Comprehensive data analysis
-- `validate.py` - Data validation
-- `transform.py` - Data transformation utilities
-
-## References
-
-- `GUIDE.md` - Comprehensive usage guide with examples
-- `API.md` - API reference documentation
-
-## Assets
-
-- `config.json` - Configuration file with default settings
-- `sample-data.csv` - Sample CSV data for testing

@@ -334,9 +334,6 @@ class CaveAgent:
         # Inject skill functions into runtime if skills are available
         if self._skill_registry.list_skills():
             self.runtime.inject_function(Function(self._skill_registry.activate_skill))
-            self.runtime.inject_function(Function(self._skill_registry.run_skill_script))
-            self.runtime.inject_function(Function(self._skill_registry.read_skill_reference))
-            self.runtime.inject_function(Function(self._skill_registry.read_skill_asset))
             self.instructions += "\n" + SKILLS_INSTRUCTION
 
     def build_system_prompt(self) -> str:

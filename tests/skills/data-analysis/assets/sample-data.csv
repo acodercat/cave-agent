@@ -1,8 +1,0 @@
-id,value,label,timestamp
-1,10.5,measurement,2024-01-01
-2,20.3,measurement,2024-01-02
-3,15.7,measurement,2024-01-03
-4,100.0,outlier,2024-01-04
-5,18.2,measurement,2024-01-05
-6,22.1,measurement,2024-01-06
-7,19.8,measurement,2024-01-07
