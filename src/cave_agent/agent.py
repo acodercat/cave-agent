@@ -1,7 +1,9 @@
-from .prompts import DEFAULT_SYSTEM_PROMPT, EXECUTION_OUTPUT_PROMPT, DEFAULT_INSTRUCTIONS, DEFAULT_AGENT_IDENTITY, DEFAULT_ADDITIONAL_CONTEXT, EXECUTION_OUTPUT_EXCEEDED_PROMPT, SECURITY_ERROR_PROMPT
-from .runtime import PythonRuntime
+from .prompts import DEFAULT_SYSTEM_PROMPT, EXECUTION_OUTPUT_PROMPT, DEFAULT_INSTRUCTIONS, DEFAULT_AGENT_IDENTITY, DEFAULT_ADDITIONAL_CONTEXT, EXECUTION_OUTPUT_EXCEEDED_PROMPT, SECURITY_ERROR_PROMPT, SKILLS_INSTRUCTION
+from .runtime import PythonRuntime, Function
 from .security import SecurityError
-from typing import List, Dict, Any, AsyncGenerator, Optional
+from .skills import Skill, SkillRegistry, SkillDiscovery
+from typing import List, Dict, Any, AsyncGenerator, Optional, Union
+from pathlib import Path
 from .models import Model, TokenUsage
 from rich.console import Console
 from rich.text import Text
@@ -250,6 +252,10 @@ class CaveAgent:
             Prevents memory bloat in long conversations. Defaults to 10.
         max_execution_result_length (int, optional): Maximum length of execution result to be fed back to the LLM.
             Prevents the agent from generating too long execution results. Defaults to 3000.
+        skills (List[Skill], optional): List of skills to load.
+            If None, no skills are loaded. Defaults to None.
+        skills_dir (Union[str, Path], optional): Directory to load skills from.
+            If None, no skills are loaded from directory. Defaults to None.
 
     Example:
         >>> def add(a: int, b: int) -> int:
@@ -276,12 +282,13 @@ class CaveAgent:
     max_history: int
     max_execution_result_length: int
     logger: Logger
+    _skill_registry: SkillRegistry
 
     def __init__(
         self,
         model: Model,
         system_prompt_template: str = DEFAULT_SYSTEM_PROMPT,
-        max_steps: int = 5,
+        max_steps: int = 10,
         log_level: LogLevel = LogLevel.DEBUG,
         agent_identity: str = DEFAULT_AGENT_IDENTITY,
         instructions: str = DEFAULT_INSTRUCTIONS,
@@ -289,8 +296,10 @@ class CaveAgent:
         runtime: Optional[PythonRuntime] = None,
         python_block_identifier: str = DEFAULT_PYTHON_BLOCK_IDENTIFIER,
         messages: Optional[List[Message]] = None,
-        max_history: int = 10,
+        max_history: int = 20,
         max_execution_result_length: int = 3000,
+        skills: Optional[List[Skill]] = None,
+        skills_dir: Optional[Union[str, Path]] = None,
     ):
         """Initialize CaveAgent with improved parameter handling."""
         self.model = model
@@ -305,6 +314,30 @@ class CaveAgent:
         self.max_history = max_history
         self.max_execution_result_length = max_execution_result_length
         self.logger = Logger(log_level)
+        self._init_skills(skills, skills_dir)
+
+    def _init_skills(
+        self,
+        skills: Optional[List[Skill]] = None,
+        skills_dir: Optional[Union[str, Path]] = None,
+    ) -> None:
+        """Initialize skills from provided list and/or directory."""
+        self._skill_registry = SkillRegistry(agent_runtime=self.runtime)
+
+        if skills_dir:
+            dir_path = Path(skills_dir) if isinstance(skills_dir, str) else skills_dir
+            self._skill_registry.add_skills(SkillDiscovery.from_directory(dir_path))
+
+        if skills:
+            self._skill_registry.add_skills([s for s in skills if s is not None])
+
+        # Inject skill functions into runtime if skills are available
+        if self._skill_registry.list_skills():
+            self.runtime.inject_function(Function(self._skill_registry.activate_skill))
+            self.runtime.inject_function(Function(self._skill_registry.run_skill_script))
+            self.runtime.inject_function(Function(self._skill_registry.read_skill_reference))
+            self.runtime.inject_function(Function(self._skill_registry.read_skill_asset))
+            self.instructions += "\n" + SKILLS_INSTRUCTION
 
     def build_system_prompt(self) -> str:
         """Build and format the system prompt with current runtime state."""
@@ -312,6 +345,7 @@ class CaveAgent:
             functions=self.runtime.describe_functions(),
             variables=self.runtime.describe_variables(),
             types=self.runtime.describe_types(),
+            skills=self._skill_registry.describe_skills(),
             agent_identity=self.agent_identity,
             instructions=self.instructions,
             current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

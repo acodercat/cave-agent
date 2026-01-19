@@ -28,6 +28,7 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 
 - [Quick Start](#quick-start)
 - [Examples](#examples)
+- [Skills](#skills)
 - [Multi-Agent Coordination](#multi-agent-coordination)
 - [Features](#features)
 - [Awesome Blogs](#awesome-blogs)
@@ -146,6 +147,124 @@ runtime = PythonRuntime(security_checker=SecurityChecker(rules))
 - [Multi-Agent](examples/multi_agent.py): Data pipeline with multiple agents
 - [Stream](examples/stream.py): Streaming responses and events
 
+## Skills
+
+Skills are reusable, self-contained instruction packages that extend agent capabilities. Each skill bundles instructions, scripts, references, and injectable code—allowing agents to acquire domain expertise on-demand.
+
+### Creating a Skill
+
+A skill is a directory containing a `SKILL.md` file with YAML frontmatter:
+
+```
+my-skill/
+├── SKILL.md           # Required: Skill definition and instructions
+├── injection.py       # Optional: Functions/variables/types to inject
+├── scripts/           # Optional: Executable Python scripts
+├── references/        # Optional: Reference documents
+└── assets/            # Optional: Static assets (JSON, images, etc.)
+```
+
+**SKILL.md** structure:
+
+```markdown
+---
+name: data-processor
+description: Process and analyze datasets with statistical methods
+license: MIT
+compatibility: Requires pandas and numpy
+metadata:
+  author: your-org
+  version: "1.0"
+---
+
+# Data Processing Instructions
+
+When activated, follow these steps:
+1. Load the dataset using the provided scripts
+2. Apply statistical analysis
+3. Return structured results
+```
+
+### Using Skills
+
+```python
+from cave_agent import CaveAgent
+from cave_agent.skills import SkillDiscovery
+
+# Load skills from directory
+agent = CaveAgent(model=model, skills_dir="./skills")
+
+# Or load specific skills
+skill = SkillDiscovery.from_file("./my-skill/SKILL.md")
+agent = CaveAgent(model=model, skills=[skill])
+```
+
+When skills are loaded, the agent gains access to these runtime functions:
+
+- `activate_skill(skill_name)` - Activate a skill and get its instructions
+- `run_skill_script(skill_name, script_name, **kwargs)` - Run a skill's script
+- `read_skill_reference(skill_name, reference_name)` - Read reference documents
+- `read_skill_asset(skill_name, asset_name)` - Read asset files
+
+### Injection Module
+
+Skills can inject functions, variables, and types into the agent's runtime when activated. Create an `injection.py` file:
+
+```python
+from cave_agent.runtime import Function, Variable, Type
+from dataclasses import dataclass
+
+def analyze_data(data: list) -> dict:
+    """Analyze data and return statistics."""
+    return {"mean": sum(data) / len(data), "count": len(data)}
+
+@dataclass
+class AnalysisResult:
+    mean: float
+    count: int
+    status: str
+
+CONFIG = {"threshold": 0.5, "max_items": 1000}
+
+__exports__ = [
+    Function(analyze_data, description="Analyze data statistically"),
+    Variable("CONFIG", value=CONFIG, description="Analysis configuration"),
+    Type(AnalysisResult, description="Result structure"),
+]
+```
+
+When `activate_skill()` is called, these exports are automatically injected into the runtime.
+
+### Skill Scripts
+
+Scripts in the `scripts/` directory can be executed via `run_skill_script()`. Each script must define a `main(runtime, **kwargs)` function:
+
+```python
+# scripts/process.py
+def main(runtime, data, threshold=0.5):
+    """Process data with the given threshold."""
+    # Access agent's runtime state if needed
+    config = runtime.retrieve("CONFIG")
+
+    # Process and return results
+    filtered = [x for x in data if x > threshold]
+    return {"filtered": filtered, "count": len(filtered)}
+```
+
+Scripts support both sync and async main functions:
+
+```python
+# scripts/fetch.py
+async def main(runtime, url):
+    """Async script for fetching data."""
+    import aiohttp
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            return await response.json()
+```
+
+See [examples/skill_data_processor.py](examples/skill_data_processor.py) for a complete example.
+
 ## Multi-Agent Coordination
 
 CaveAgent introduces three foundational innovations for multi-agent coordination:
@@ -168,6 +287,7 @@ Multiple agents can operate on a unified runtime instance. When one agent modifi
   - Flexible security rules: ImportRule, FunctionRule, AttributeRule, RegexRule
   - Customizable security policies for different use cases
   - Access execution results and maintain state across interactions
+- **Skills System**: Modular, reusable instruction packages with injectable code, scripts, and resources. Agents can activate skills on-demand to acquire domain expertise.
 - **Multi-Agent Coordination**: Control sub-agents programmatically through runtime injection and retrieval. Shared runtimes enable instant state synchronization.
 - **Streaming & Async**: Real-time event streaming and full async/await support for optimal performance
 - **Execution Control**: Configurable step limits and error handling to prevent infinite loops
@@ -193,6 +313,8 @@ We thank these community to post our work.
 | `max_steps` | `int` | `5` | Maximum execution steps per run |
 | `max_history` | `int` | `10` | Maximum conversation history length |
 | `max_execution_result_length` | `int` | `3000` | Max characters in execution output |
+| `skills` | `List[Skill]` | `None` | List of skill objects to load |
+| `skills_dir` | `str \| Path` | `None` | Directory to discover and load skills from |
 | `agent_identity` | `str` | default | Agent's role/identity description |
 | `instructions` | `str` | default | Task instructions for the agent |
 | `additional_context` | `str` | default | Extra context information |

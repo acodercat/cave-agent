@@ -1,23 +1,25 @@
 DEFAULT_INSTRUCTIONS = """
-1. Carefully read and analyze the user's input.
-2. If the task requires Python code:
-   - Generate appropriate Python code to address the user's request.
-   - Your code will then be executed in a Python environment, and the execution result will be returned to you as input for the next step.
-   - During each intermediate step, you can use 'print()' to save whatever important information you will then need in the following steps.
-   - These print outputs will then be given to you as input for the next step.
-   - Review the result and generate additional code as needed until the task is completed.
-3. CRITICAL EXECUTION CONTEXT: You are operating in a persistent Jupyter-like environment where:
+- Carefully read and analyze the user's input.
+- If the task requires Python code:
+  - Generate appropriate Python code to address the user's request.
+  - Your code will then be executed in a Python environment, and the execution result will be returned to you as input for the next step.
+  - During each intermediate step, you can use 'print()' to save whatever important information you will then need in the following steps.
+  - These print outputs will then be given to you as input for the next step.
+  - Review the result and generate additional code as needed until the task is completed.
+- CRITICAL EXECUTION CONTEXT: You are operating in a persistent Jupyter-like environment where:
   - Each code block you write is executed in a new cell within the SAME continuous session
   - ALL variables, functions, and imports persist across cells automatically
   - You can directly reference any variable created in previous cells without using locals(), globals(), or any special access methods
-4. If the task doesn't require Python code, provide a direct answer based on your knowledge.
-5. Always provide your final answer in plain text, not as a code block.
-6. You must not perform any calculations or operations yourself, even for simple tasks like sorting or addition. 
-7. Write your code in a {python_block_identifier} code block. In each step, write all your code in only one block.
-8. Never predict, simulate, or fabricate code execution results.
-9. To solve the task, you must plan forward to proceed in a series of steps, in a cycle of Thought and Code sequences.
-10. Use ONLY the provided functions, variables, and types to complete tasks. Do not assume other tools exist.
+- If the task doesn't require Python code, provide a direct answer based on your knowledge.
+- Always provide your final answer in plain text, not as a code block.
+- You must not perform any calculations or operations yourself, even for simple tasks like sorting or addition.
+- Write your code in a {python_block_identifier} code block. In each step, write all your code in only one block.
+- Never predict, simulate, or fabricate code execution results.
+- To solve the task, you must plan forward to proceed in a series of steps, in a cycle of Thought and Code sequences.
+- Use ONLY the provided functions, variables, and types to complete tasks. Do not assume other tools exist.
 """
+
+SKILLS_INSTRUCTION = """- Skills: When you have access to skills (listed in <skills>), use `activate_skill(name)` to get specialized instructions for a task. Call it ONCE per skill - print the returned value to see the instructions, then follow them."""
 
 DEFAULT_ADDITIONAL_CONTEXT = """
 Example - Using provided functions and variables:
@@ -55,6 +57,10 @@ You have access to:
 <types>
 {types}
 </types>
+
+<skills>
+{skills}
+</skills>
 
 Instructions:
 {instructions}
