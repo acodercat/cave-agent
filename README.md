@@ -28,7 +28,7 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 
 - [Quick Start](#quick-start)
 - [Examples](#examples)
-- [Skills](#skills)
+- [Agent Skills](#agent-skills)
 - [Multi-Agent Coordination](#multi-agent-coordination)
 - [Features](#features)
 - [Awesome Blogs](#awesome-blogs)
@@ -147,7 +147,7 @@ runtime = PythonRuntime(security_checker=SecurityChecker(rules))
 - [Multi-Agent](examples/multi_agent.py): Data pipeline with multiple agents
 - [Stream](examples/stream.py): Streaming responses and events
 
-## Skills
+## Agent Skills
 
 CaveAgent implements the [Agent Skills](https://agentskills.io) open standard—a portable format for packaging instructions, scripts, and resources that agents can discover and use. Originally developed by Anthropic and now supported across the AI ecosystem (Claude, Gemini CLI, Cursor, VS Code, and more), Skills enable agents to acquire domain expertise on-demand.
 
