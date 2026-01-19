@@ -1,0 +1,16 @@
+{
+    "version": "1.0.0",
+    "settings": {
+        "default_threshold": 1.5,
+        "max_iterations": 1000,
+        "precision": 6
+    },
+    "thresholds": {
+        "outlier_mild": 1.5,
+        "outlier_extreme": 3.0
+    },
+    "formats": {
+        "date": "%Y-%m-%d",
+        "datetime": "%Y-%m-%d %H:%M:%S"
+    }
+}
