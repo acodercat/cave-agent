@@ -149,16 +149,24 @@ runtime = PythonRuntime(security_checker=SecurityChecker(rules))
 
 ## Skills
 
-Skills are reusable, self-contained instruction packages that extend agent capabilities. Each skill bundles instructions, scripts, references, and injectable code—allowing agents to acquire domain expertise on-demand.
+CaveAgent implements the [Agent Skills](https://agentskills.io) open standard—a portable format for packaging instructions, scripts, and resources that agents can discover and use. Originally developed by Anthropic and now supported across the AI ecosystem (Claude, Gemini CLI, Cursor, VS Code, and more), Skills enable agents to acquire domain expertise on-demand.
+
+**Key benefits**:
+- **Specialize agents**: Package domain-specific workflows and best practices
+- **Reduce repetition**: Create once, use automatically across conversations
+- **Compose capabilities**: Combine Skills to build complex workflows
+- **Interoperability**: Same Skill works across skills-compatible agent products
+
+> For the complete specification, see [Agent Skills Documentation](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview).
 
 ### Creating a Skill
 
-A skill is a directory containing a `SKILL.md` file with YAML frontmatter:
+A Skill is a directory containing a `SKILL.md` file with YAML frontmatter:
 
 ```
 my-skill/
 ├── SKILL.md           # Required: Skill definition and instructions
-├── injection.py       # Optional: Functions/variables/types to inject
+├── injection.py       # Optional: Functions/variables/types to inject (CaveAgent extension)
 ├── scripts/           # Optional: Executable Python scripts
 ├── references/        # Optional: Reference documents
 └── assets/            # Optional: Static assets (JSON, images, etc.)
@@ -169,21 +177,35 @@ my-skill/
 ```markdown
 ---
 name: data-processor
-description: Process and analyze datasets with statistical methods
-license: MIT
-compatibility: Requires pandas and numpy
-metadata:
-  author: your-org
-  version: "1.0"
+description: Process and analyze datasets with statistical methods. Use when working with data analysis tasks.
 ---
 
 # Data Processing Instructions
 
-When activated, follow these steps:
+## Quick Start
+Use the provided scripts to analyze datasets...
+
+## Workflows
 1. Load the dataset using the provided scripts
 2. Apply statistical analysis
 3. Return structured results
+
+For advanced usage, see [ADVANCED.md](ADVANCED.md).
 ```
+
+**Required fields**: `name` (max 64 chars, lowercase with hyphens) and `description` (max 1024 chars)
+
+**Optional fields**: `license`, `compatibility`, `metadata`
+
+### How Skills Load (Progressive Disclosure)
+
+Skills use progressive disclosure to minimize context usage:
+
+| Level | When Loaded | Content |
+|-------|-------------|---------|
+| **Metadata** | At startup | `name` and `description` from YAML frontmatter (~100 tokens) |
+| **Instructions** | When activated | SKILL.md body with guidance (loaded on-demand) |
+| **Resources** | As needed | Scripts, references, assets (loaded only when referenced) |
 
 ### Using Skills
 
@@ -201,14 +223,14 @@ agent = CaveAgent(model=model, skills=[skill])
 
 When skills are loaded, the agent gains access to these runtime functions:
 
-- `activate_skill(skill_name)` - Activate a skill and get its instructions
+- `activate_skill(skill_name)` - Activate a skill and load its instructions
 - `run_skill_script(skill_name, script_name, **kwargs)` - Run a skill's script
 - `read_skill_reference(skill_name, reference_name)` - Read reference documents
 - `read_skill_asset(skill_name, asset_name)` - Read asset files
 
-### Injection Module
+### Injection Module (CaveAgent Extension)
 
-Skills can inject functions, variables, and types into the agent's runtime when activated. Create an `injection.py` file:
+CaveAgent extends the Agent Skills standard with `injection.py`—allowing skills to inject functions, variables, and types directly into the runtime when activated:
 
 ```python
 from cave_agent.runtime import Function, Variable, Type
@@ -233,17 +255,17 @@ __exports__ = [
 ]
 ```
 
-When `activate_skill()` is called, these exports are automatically injected into the runtime.
+When `activate_skill()` is called, these exports are automatically injected into the runtime namespace.
 
 ### Skill Scripts
 
-Scripts in the `scripts/` directory can be executed via `run_skill_script()`. Each script must define a `main(runtime, **kwargs)` function:
+Scripts in the `scripts/` directory can be executed via `run_skill_script()`. Each script must define a `main(runtime, **kwargs)` function with access to the agent's runtime:
 
 ```python
 # scripts/process.py
 def main(runtime, data, threshold=0.5):
     """Process data with the given threshold."""
-    # Access agent's runtime state if needed
+    # Access agent's runtime state
     config = runtime.retrieve("CONFIG")
 
     # Process and return results
@@ -287,7 +309,7 @@ Multiple agents can operate on a unified runtime instance. When one agent modifi
   - Flexible security rules: ImportRule, FunctionRule, AttributeRule, RegexRule
   - Customizable security policies for different use cases
   - Access execution results and maintain state across interactions
-- **Skills System**: Modular, reusable instruction packages with injectable code, scripts, and resources. Agents can activate skills on-demand to acquire domain expertise.
+- **[Agent Skills](https://agentskills.io)**: Implements the open Agent Skills standard for modular, portable instruction packages. Skills bundle instructions, scripts, and resources that agents load on-demand. CaveAgent extends the standard with runtime injection (`injection.py`).
 - **Multi-Agent Coordination**: Control sub-agents programmatically through runtime injection and retrieval. Shared runtimes enable instant state synchronization.
 - **Streaming & Async**: Real-time event streaming and full async/await support for optimal performance
 - **Execution Control**: Configurable step limits and error handling to prevent infinite loops
