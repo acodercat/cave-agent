@@ -1,4 +1,5 @@
-DEFAULT_INSTRUCTIONS = """
+DEFAULT_SYSTEM_INSTRUCTIONS = """
+- You solve tasks by writing and executing Python code using the provided functions, variables, and their methods.
 - Carefully read and analyze the user's input.
 - If the task requires Python code:
   - Generate appropriate Python code to address the user's request.
@@ -17,12 +18,7 @@ DEFAULT_INSTRUCTIONS = """
 - Never predict, simulate, or fabricate code execution results.
 - To solve the task, you must plan forward to proceed in a series of steps, in a cycle of Thought and Code sequences.
 - Use ONLY the provided functions, variables, and types to complete tasks. Do not assume other tools exist.
-"""
-
-SKILLS_INSTRUCTION = """- Skills: When you have access to skills (listed in <skills>), use `activate_skill(name)` to get specialized instructions for a task. Call it ONCE per skill - print the returned value to see the instructions, then follow them."""
-
-DEFAULT_ADDITIONAL_CONTEXT = """
-Example - Using provided functions and variables:
+- Example usage:
 ```{python_block_identifier}
 # Call a function
 result = add(5, 3)
@@ -34,13 +30,14 @@ print(f"Processed: {{processed}}")
 ```
 """
 
+SKILLS_INSTRUCTION = """- Skills: When you have access to skills (listed in <skills>), use `activate_skill(name)` to get specialized instructions for a task. Call it ONCE per skill - print the returned value to see the instructions, then follow them."""
 
-DEFAULT_AGENT_IDENTITY = """
-You are a Python code execution agent. You solve tasks by writing and executing Python code using the provided functions, variables, and their methods.
-"""
+DEFAULT_INSTRUCTIONS = """You are a Python code execution agent. You solve tasks by writing and executing Python code using the provided functions, variables, and their methods."""
 
-DEFAULT_SYSTEM_PROMPT = """
-{agent_identity}
+DEFAULT_SYSTEM_PROMPT_TEMPLATE = """
+{instructions}
+
+{system_instructions}
 
 Current time: {current_time}
 
@@ -61,11 +58,6 @@ You have access to:
 <skills>
 {skills}
 </skills>
-
-Instructions:
-{instructions}
-
-{additional_context}
 """
 
 EXECUTION_OUTPUT_PROMPT = """

@@ -10,7 +10,7 @@
   <a href="https://arxiv.org/abs/2601.01569"><img src="https://img.shields.io/badge/arXiv-Paper-red?style=flat-square&logo=arxiv" alt="arXiv Paper"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat-square" alt="Python 3.11+"></a>
-  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.6.3-blue?style=flat-square" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.6.4-blue?style=flat-square" alt="PyPI version"></a>
 </p>
 
 <p align="center">
@@ -277,20 +277,19 @@ We thank these community to post our work.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `model` | `Model` | required | LLM model instance (OpenAIServerModel or LiteLLMModel) |
-| `runtime` | `PythonRuntime` | `None` | Python runtime with variables, functions, and types |
-| `max_steps` | `int` | `5` | Maximum execution steps per run |
-| `max_history` | `int` | `10` | Maximum conversation history length |
-| `max_execution_result_length` | `int` | `3000` | Max characters in execution output |
-| `skills` | `List[Skill]` | `None` | List of skill objects to load |
-| `skills_dir` | `str \| Path` | `None` | Directory to discover and load skills from |
-| `agent_identity` | `str` | default | Agent's role/identity description |
-| `instructions` | `str` | default | Task instructions for the agent |
-| `additional_context` | `str` | default | Extra context information |
-| `system_prompt_template` | `str` | default | Custom system prompt template |
-| `python_block_identifier` | `str` | `"python"` | Code block language identifier |
-| `messages` | `List[Message]` | `None` | Initial message history |
-| `log_level` | `LogLevel` | `DEBUG` | Logging verbosity level |
+| model | Model | required | LLM model instance (OpenAIServerModel or LiteLLMModel) |
+| runtime | PythonRuntime | None | Python runtime with variables, functions, and types |
+| max_steps | int | 5 | Maximum execution steps per run |
+| max_history | int | 10 | Maximum conversation history length |
+| max_exec_output | int | 5000 | Max characters in execution output |
+| skills | List[Skill] | None | List of skill objects to load |
+| skills_dir | str \| Path | None | Directory to discover and load skills from |
+| instructions | str | default | User instructions defining agent role and behavior |
+| system_instructions | str | default | System-level execution rules and examples |
+| system_prompt_template | str | default | Custom system prompt template |
+| python_block_identifier | str | python | Code block language identifier |
+| messages | List[Message] | None | Initial message history |
+| log_level | LogLevel | DEBUG | Logging verbosity level |
 
 ## LLM Provider Support
 

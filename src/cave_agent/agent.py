@@ -1,4 +1,4 @@
-from .prompts import DEFAULT_SYSTEM_PROMPT, EXECUTION_OUTPUT_PROMPT, DEFAULT_INSTRUCTIONS, DEFAULT_AGENT_IDENTITY, DEFAULT_ADDITIONAL_CONTEXT, EXECUTION_OUTPUT_EXCEEDED_PROMPT, SECURITY_ERROR_PROMPT, SKILLS_INSTRUCTION
+from .prompts import DEFAULT_SYSTEM_PROMPT_TEMPLATE, EXECUTION_OUTPUT_PROMPT, DEFAULT_SYSTEM_INSTRUCTIONS, DEFAULT_INSTRUCTIONS, EXECUTION_OUTPUT_EXCEEDED_PROMPT, SECURITY_ERROR_PROMPT, SKILLS_INSTRUCTION
 from .runtime import PythonRuntime, Function
 from .security import SecurityError
 from .skills import Skill, SkillRegistry, SkillDiscovery
@@ -47,7 +47,6 @@ class UserMessage(Message):
     def __init__(self, content: str):
         super().__init__(content, MessageRole.USER)
 class AssistantMessage(Message):
-
     """Message from the assistant (LLM) to the user."""
     def __init__(self, content: str):
         super().__init__(content, MessageRole.ASSISTANT)
@@ -231,31 +230,18 @@ class CaveAgent:
 
     Args:
         model (Model): LLM model instance implementing the Model interface.
-            Supports OpenAIServerModel, LiteLLMModel, or custom implementations.
-        system_prompt_template (str, optional): Template string for system prompt.
-            Uses placeholders for runtime context. Defaults to DEFAULT_SYSTEM_PROMPT.
-        max_steps (int, optional): Maximum execution steps before stopping.
-            Prevents infinite loops. Defaults to 5.
-        log_level (LogLevel, optional): Logging verbosity level.
-            Options: ERROR (0), INFO (1), DEBUG (2). Defaults to DEBUG.
-        agent_role (str, optional): Role definition and capabilities description.
-            Informs the LLM about the agent's purpose. Defaults to DEFAULT_ROLE_DEFINITION.
-        instructions (str, optional): Execution instructions for the agent.
-            Guides how the agent should process requests. Defaults to DEFAULT_INSTRUCTIONS.
-        additional_context (str, optional): Additional context and usage examples.
-            Helps the LLM understand available tools. Defaults to DEFAULT_ADDITIONAL_CONTEXT.
         runtime (PythonRuntime, optional): Python runtime with functions and variables.
-            If None, creates an empty runtime. Defaults to None.
-        messages (List[Message], optional): Initial conversation history.
-            List of Message objects to start with. Defaults to empty list.
-        max_history (int, optional): Maximum message history to retain.
-            Prevents memory bloat in long conversations. Defaults to 10.
-        max_execution_result_length (int, optional): Maximum length of execution result to be fed back to the LLM.
-            Prevents the agent from generating too long execution results. Defaults to 3000.
-        skills (List[Skill], optional): List of skills to load.
-            If None, no skills are loaded. Defaults to None.
+        instructions (str, optional): User instructions defining agent role and behavior.
         skills_dir (Union[str, Path], optional): Directory to load skills from.
-            If None, no skills are loaded from directory. Defaults to None.
+        skills (List[Skill], optional): List of skills to load.
+        max_steps (int, optional): Maximum execution steps before stopping.
+        max_history (int, optional): Maximum message history to retain.
+        max_exec_output (int, optional): Maximum length of execution output.
+        system_instructions (str, optional): System-level execution rules and examples.
+        system_prompt_template (str, optional): Template string for system prompt.
+        python_block_identifier (str, optional): Code block language identifier.
+        messages (List[Message], optional): Initial conversation history.
+        log_level (LogLevel, optional): Logging verbosity level.
 
     Example:
         >>> def add(a: int, b: int) -> int:
@@ -270,49 +256,33 @@ class CaveAgent:
         >>> print(result)  # "The sum is: 8"
     """
 
-    model: Model
-    system_prompt_template: str
-    max_steps: int
-    runtime: PythonRuntime
-    agent_identity: str
-    instructions: str
-    additional_context: str
-    python_block_identifier: str
-    messages: List[Message]
-    max_history: int
-    max_execution_result_length: int
-    logger: Logger
-    _skill_registry: SkillRegistry
-
     def __init__(
         self,
         model: Model,
-        system_prompt_template: str = DEFAULT_SYSTEM_PROMPT,
-        max_steps: int = 10,
-        log_level: LogLevel = LogLevel.DEBUG,
-        agent_identity: str = DEFAULT_AGENT_IDENTITY,
-        instructions: str = DEFAULT_INSTRUCTIONS,
-        additional_context: str = DEFAULT_ADDITIONAL_CONTEXT,
         runtime: Optional[PythonRuntime] = None,
+        instructions: str = DEFAULT_INSTRUCTIONS,
+        skills_dir: Optional[Union[str, Path]] = None,
+        skills: Optional[List[Skill]] = None,
+        max_steps: int = 10,
+        max_history: int = 20,
+        max_exec_output: int = 5000,
+        system_instructions: str = DEFAULT_SYSTEM_INSTRUCTIONS,
+        system_prompt_template: str = DEFAULT_SYSTEM_PROMPT_TEMPLATE,
         python_block_identifier: str = DEFAULT_PYTHON_BLOCK_IDENTIFIER,
         messages: Optional[List[Message]] = None,
-        max_history: int = 20,
-        max_execution_result_length: int = 3000,
-        skills: Optional[List[Skill]] = None,
-        skills_dir: Optional[Union[str, Path]] = None,
+        log_level: LogLevel = LogLevel.DEBUG,
     ):
         """Initialize CaveAgent with improved parameter handling."""
         self.model = model
         self.system_prompt_template = system_prompt_template
         self.max_steps = max_steps
         self.runtime = runtime if runtime else PythonRuntime()
-        self.agent_identity = agent_identity
-        self.instructions = instructions.format(python_block_identifier=python_block_identifier)
-        self.additional_context = additional_context.format(python_block_identifier=python_block_identifier)
+        self.instructions = instructions
+        self.system_instructions = system_instructions.format(python_block_identifier=python_block_identifier)
         self.python_block_identifier = python_block_identifier
         self.messages = list(messages) if messages else []
         self.max_history = max_history
-        self.max_execution_result_length = max_execution_result_length
+        self.max_exec_output = max_exec_output
         self.logger = Logger(log_level)
         self._init_skills(skills, skills_dir)
 
@@ -334,7 +304,7 @@ class CaveAgent:
         # Inject skill functions into runtime if skills are available
         if self._skill_registry.list_skills():
             self.runtime.inject_function(Function(self._skill_registry.activate_skill))
-            self.instructions += "\n" + SKILLS_INSTRUCTION
+            self.system_instructions += "\n" + SKILLS_INSTRUCTION
 
     def build_system_prompt(self) -> str:
         """Build and format the system prompt with current runtime state."""
@@ -343,10 +313,9 @@ class CaveAgent:
             variables=self.runtime.describe_variables(),
             types=self.runtime.describe_types(),
             skills=self._skill_registry.describe_skills(),
-            agent_identity=self.agent_identity,
             instructions=self.instructions,
+            system_instructions=self.system_instructions,
             current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            additional_context=self.additional_context,
         )
 
     async def run(self, query: str) -> AgentResponse:
@@ -488,10 +457,10 @@ class CaveAgent:
         stdout_length = len(stdout)
 
         # Check if output exceeds limit
-        if stdout_length > self.max_execution_result_length:
+        if stdout_length > self.max_exec_output:
             self.logger.debug(
                 "Execution output too long",
-                f"Output length: {stdout_length} characters (max: {self.max_execution_result_length})",
+                f"Output length: {stdout_length} characters (max: {self.max_exec_output})",
                 "yellow"
             )
             return ExecutionOutcome(
@@ -499,7 +468,7 @@ class CaveAgent:
                 event_content=stdout,
                 next_prompt=EXECUTION_OUTPUT_EXCEEDED_PROMPT.format(
                     output_length=stdout_length,
-                    max_length=self.max_execution_result_length
+                    max_length=self.max_exec_output
                 )
             )
 
