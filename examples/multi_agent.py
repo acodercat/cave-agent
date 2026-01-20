@@ -65,9 +65,6 @@ async def main():
     # ==========================================================================
 
 
-    orchestrator_agent_identity = """
-    You are a supervisor agent. You coordinate the work of the cleaner and analyzer agents. You solve tasks by writing and executing Python code using the provided functions, variables, and their methods.
-    """
     orchestrator = CaveAgent(
         model,
         runtime=PythonRuntime(
@@ -82,9 +79,9 @@ async def main():
                 Variable("insights", {}, "Insights from analyzer agent"),
             ]
         ),
-        agent_identity=orchestrator_agent_identity,
+        instructions="You are a supervisor agent. You coordinate the work of the cleaner and analyzer agents.",
         max_steps=20,
-        max_execution_result_length=50000
+        max_exec_output=50000
     )
 
     # ==========================================================================
