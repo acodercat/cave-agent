@@ -27,7 +27,8 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Hello World](#hello-world)
 - [Examples](#examples)
   - [Function Calling](#function-calling)
   - [Stateful Object Interactions](#stateful-object-interactions)
@@ -36,13 +37,14 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
   - [Security Rules](#security-rules)
 - [Agent Skills](#agent-skills)
   - [Creating a Skill](#creating-a-skill)
+  - [How Skills Load](#how-skills-load-progressive-disclosure)
   - [Using Skills](#using-skills)
   - [Injection Module](#injection-module-caveagent-extension)
 - [Features](#features)
 - [Configuration](#configuration)
 - [LLM Provider Support](#llm-provider-support)
 
-## Quick Start
+## Installation
 
 ```bash
 pip install 'cave-agent[all]'
@@ -54,8 +56,38 @@ Choose your installation:
 # OpenAI support
 pip install 'cave-agent[openai]'
 
-# 100+ LLM providers via LiteLLM 
+# 100+ LLM providers via LiteLLM
 pip install 'cave-agent[litellm]'
+```
+
+## Hello World
+
+```python
+import asyncio
+from cave_agent import CaveAgent
+from cave_agent.runtime import PythonRuntime, Variable, Function
+from cave_agent.models import LiteLLMModel
+
+model = LiteLLMModel(model_id="model-id", api_key="your-api-key", custom_llm_provider="openai")
+
+async def main():
+    def reverse(s: str) -> str:
+        """Reverse a string"""
+        return s[::-1]
+
+    runtime = PythonRuntime(
+        variables=[
+            Variable("secret", "!dlrow ,olleH", "A reversed message"),
+            Variable("greeting", "", "Store the reversed message"),
+        ],
+        functions=[Function(reverse)],
+    )
+    agent = CaveAgent(model, runtime=runtime)
+    response = await agent.run("Reverse the secret")
+    print(runtime.retrieve("greeting"))  # Hello, world!
+    print(response.content)              # Agent's text response
+
+asyncio.run(main())
 ```
 
 ## Examples
