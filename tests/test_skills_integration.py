@@ -44,9 +44,10 @@ def agent_with_skills(model, skills_dir):
         ]
     )
 
+    skills = SkillDiscovery.from_directory(skills_dir)
     return CaveAgent(
         model=model,
-        skills_dir=skills_dir,
+        skills=skills,
         runtime=runtime,
         max_steps=10
     )

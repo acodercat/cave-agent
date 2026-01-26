@@ -10,7 +10,7 @@
   <a href="https://arxiv.org/abs/2601.01569"><img src="https://img.shields.io/badge/arXiv-Paper-red?style=flat-square&logo=arxiv" alt="arXiv Paper"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat-square" alt="Python 3.11+"></a>
-  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.6.4-blue?style=flat-square" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.6.5-blue?style=flat-square" alt="PyPI version"></a>
 </p>
 
 <p align="center">
@@ -235,15 +235,27 @@ Skills use progressive disclosure to minimize context usage:
 ### Using Skills
 
 ```python
-from cave_agent import CaveAgent
+from cave_agent import CaveAgent, Skill
 from cave_agent.skills import SkillDiscovery
+from cave_agent.runtime import Function, Variable
 
-# Load skills from directory
-agent = CaveAgent(model=model, skills_dir="./skills")
+# Create skills directly
+skill = Skill(
+    name="my-skill",
+    description="A custom skill",
+    body_content="# Instructions\nFollow these steps...",
+    functions=[Function(my_func)],
+    variables=[Variable("config", value={})],
+)
+agent = CaveAgent(model=model, skills=[skill])
 
-# Or load specific skills
+# Or load from files
 skill = SkillDiscovery.from_file("./my-skill/SKILL.md")
 agent = CaveAgent(model=model, skills=[skill])
+
+# Or load from directory
+skills = SkillDiscovery.from_directory("./skills")
+agent = CaveAgent(model=model, skills=skills)
 ```
 
 When skills are loaded, the agent gains access to the `activate_skill(skill_name)` runtime function to activate a skill and load its instructions.
@@ -311,11 +323,10 @@ We thank these community to post our work.
 |-----------|------|---------|-------------|
 | model | Model | required | LLM model instance (OpenAIServerModel or LiteLLMModel) |
 | runtime | PythonRuntime | None | Python runtime with variables, functions, and types |
+| skills | List[Skill] | None | List of skill objects to load |
 | max_steps | int | 5 | Maximum execution steps per run |
 | max_history | int | 10 | Maximum conversation history length |
 | max_exec_output | int | 5000 | Max characters in execution output |
-| skills | List[Skill] | None | List of skill objects to load |
-| skills_dir | str \| Path | None | Directory to discover and load skills from |
 | instructions | str | default | User instructions defining agent role and behavior |
 | system_instructions | str | default | System-level execution rules and examples |
 | system_prompt_template | str | default | Custom system prompt template |

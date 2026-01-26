@@ -1,9 +1,8 @@
 from .prompts import DEFAULT_SYSTEM_PROMPT_TEMPLATE, EXECUTION_OUTPUT_PROMPT, DEFAULT_SYSTEM_INSTRUCTIONS, DEFAULT_INSTRUCTIONS, EXECUTION_OUTPUT_EXCEEDED_PROMPT, SECURITY_ERROR_PROMPT, SKILLS_INSTRUCTION
 from .runtime import PythonRuntime, Function
 from .security import SecurityError
-from .skills import Skill, SkillRegistry, SkillDiscovery
-from typing import List, Dict, Any, AsyncGenerator, Optional, Union
-from pathlib import Path
+from .skills import Skill, SkillRegistry
+from typing import List, Dict, Any, AsyncGenerator, Optional
 from .models import Model, TokenUsage
 from rich.console import Console
 from rich.text import Text
@@ -232,7 +231,6 @@ class CaveAgent:
         model (Model): LLM model instance implementing the Model interface.
         runtime (PythonRuntime, optional): Python runtime with functions and variables.
         instructions (str, optional): User instructions defining agent role and behavior.
-        skills_dir (Union[str, Path], optional): Directory to load skills from.
         skills (List[Skill], optional): List of skills to load.
         max_steps (int, optional): Maximum execution steps before stopping.
         max_history (int, optional): Maximum message history to retain.
@@ -261,7 +259,6 @@ class CaveAgent:
         model: Model,
         runtime: Optional[PythonRuntime] = None,
         instructions: str = DEFAULT_INSTRUCTIONS,
-        skills_dir: Optional[Union[str, Path]] = None,
         skills: Optional[List[Skill]] = None,
         max_steps: int = 10,
         max_history: int = 20,
@@ -284,19 +281,11 @@ class CaveAgent:
         self.max_history = max_history
         self.max_exec_output = max_exec_output
         self.logger = Logger(log_level)
-        self._init_skills(skills, skills_dir)
+        self._init_skills(skills)
 
-    def _init_skills(
-        self,
-        skills: Optional[List[Skill]] = None,
-        skills_dir: Optional[Union[str, Path]] = None,
-    ) -> None:
-        """Initialize skills from provided list and/or directory."""
-        self._skill_registry = SkillRegistry(agent_runtime=self.runtime)
-
-        if skills_dir:
-            dir_path = Path(skills_dir) if isinstance(skills_dir, str) else skills_dir
-            self._skill_registry.add_skills(SkillDiscovery.from_directory(dir_path))
+    def _init_skills(self, skills: Optional[List[Skill]] = None) -> None:
+        """Initialize skills from provided list."""
+        self._skill_registry = SkillRegistry(self.runtime)
 
         if skills:
             self._skill_registry.add_skills([s for s in skills if s is not None])

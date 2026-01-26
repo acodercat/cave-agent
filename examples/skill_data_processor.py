@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 from cave_agent import CaveAgent
+from cave_agent.skills import SkillDiscovery
 from cave_agent.models import LiteLLMModel
 
 
@@ -17,11 +18,12 @@ async def main():
 
     # Get skills directory path
     skills_dir = Path(__file__).parent / "skills"
+    skills = SkillDiscovery.from_directory(skills_dir)
 
     print("=== Sales Analysis Assistant ===\n")
 
     # Create agent with skills
-    agent = CaveAgent(model=model, skills_dir=skills_dir)
+    agent = CaveAgent(model=model, skills=skills)
 
     # Show available skills
     print("Available skills:")

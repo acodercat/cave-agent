@@ -5,7 +5,7 @@ from typing import (
 import inspect
 
 from .executor import PythonExecutor, ExecutionResult, ErrorFeedbackMode
-from .types import Variable, Function, Type
+from .primitives import Variable, Function, Type
 from ..security import SecurityChecker
 
 
