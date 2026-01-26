@@ -2,7 +2,7 @@ from .agent import CaveAgent, Message, MessageRole, LogLevel, Logger, EventType
 from .models import Model, ModelResponse, TokenUsage, OpenAIServerModel, LiteLLMModel
 from .runtime import PythonRuntime, Function, Variable, Type
 from .security import SecurityChecker, SecurityError, SecurityViolation, SecurityRule, ImportRule, FunctionRule, AttributeRule, RegexRule
-from .skills import Skill, SkillFrontmatter, SkillDiscovery, SkillRegistry, SkillInjectionError
+from .skills import Skill, SkillDiscovery, SkillRegistry
 
 __all__ = [
     "CaveAgent",
@@ -29,8 +29,6 @@ __all__ = [
     "AttributeRule",
     "RegexRule",
     "Skill",
-    "SkillFrontmatter",
     "SkillDiscovery",
     "SkillRegistry",
-    "SkillInjectionError",
 ]

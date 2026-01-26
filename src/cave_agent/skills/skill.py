@@ -1,131 +1,60 @@
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional, Dict, List, Any
-import re
-import importlib.util
+from typing import List, Optional
 from ..runtime import Function, Variable, Type
-from .constants import INJECTION_FILENAME
 
 
-class SkillInjectionError(Exception):
-    """Raised when skill injection setup fails."""
-    pass
+class Skill:
+    """
+    A skill that can be loaded into a CaveAgent.
 
+    Skills provide domain-specific instructions and optionally inject
+    functions, variables, and types into the agent's runtime.
 
-@dataclass
-class SkillFrontmatter:
-    """Data extracted from skill file YAML frontmatter."""
+    Users can create skills directly:
+        skill = Skill(
+            name="my-skill",
+            description="Does something useful",
+            body_content="# Instructions\\nFollow these steps...",
+            functions=[Function(my_func)],
+            variables=[Variable("config", value={})],
+        )
+
+    Or load from files using SkillDiscovery:
+        skill = SkillDiscovery.from_file(Path("my-skill/SKILL.md"))
+    """
+
     name: str
     description: str
-    license: Optional[str] = None
-    compatibility: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
-
-
-@dataclass
-class SkillInjection:
-    """Functions, variables, and types to inject from a skill's injection module."""
+    body_content: str
     functions: List[Function]
     variables: List[Variable]
     types: List[Type]
 
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        body_content: str = "",
+        functions: Optional[List[Function]] = None,
+        variables: Optional[List[Variable]] = None,
+        types: Optional[List[Type]] = None,
+    ):
+        """
+        Initialize a skill.
 
-@dataclass
-class Skill:
-    """
-    Represents a skill with progressive loading.
+        Args:
+            name: Skill name (used to identify and activate the skill)
+            description: Brief description of what the skill does
+            body_content: Instructions and guidance for using the skill
+            functions: Functions to inject into runtime when activated
+            variables: Variables to inject into runtime when activated
+            types: Types to inject into runtime when activated
+        """
+        self.name = name
+        self.description = description
+        self.body_content = body_content
+        self.functions = functions or []
+        self.variables = variables or []
+        self.types = types or []
 
-    Frontmatter (name, description) is loaded at startup from YAML frontmatter.
-    The body content and runtime are lazy-loaded on demand when the skill is selected.
-    """
-    frontmatter: SkillFrontmatter
-    path: Path
-    _body_content: Optional[str] = field(default=None, repr=False)
-    _injection: Optional[SkillInjection] = field(default=None, repr=False)
-
-    @property
-    def name(self) -> str:
-        """Get the skill name."""
-        return self.frontmatter.name
-
-    @property
-    def description(self) -> str:
-        """Get the skill description."""
-        return self.frontmatter.description
-
-    @property
-    def body_content(self) -> str:
-        """Get skill body content, loading from file if needed."""
-        if self._body_content is None:
-            self._parse_body()
-        return self._body_content or ""
-
-    @property
-    def injection_path(self) -> Path:
-        """Get the path to the skill's injection module."""
-        return self.path.parent / INJECTION_FILENAME
-
-    @property
-    def has_injection(self) -> bool:
-        """Check if the skill has an injection module."""
-        return self.injection_path.exists()
-
-    @property
-    def injection(self) -> Optional[SkillInjection]:
-        """Get skill injection exports, loading from file if needed."""
-        if self._injection is None and self.has_injection:
-            self._setup_injection()
-        return self._injection
-
-    def _parse_body(self) -> None:
-        """Parse body content from the skill file (everything after frontmatter)."""
-        if not self.path.exists():
-            self._body_content = ""
-            return
-
-        content = self.path.read_text(encoding="utf-8")
-
-        # Remove YAML frontmatter and return the rest
-        frontmatter_pattern = r"^---\s*\n.*?\n---\s*\n?"
-        match = re.match(frontmatter_pattern, content, re.DOTALL)
-        if match:
-            self._body_content = content[match.end():].strip()
-        else:
-            self._body_content = content.strip()
-
-    def _setup_injection(self) -> None:
-        """Setup functions and variables from the skill's injection module."""
-        # Load the module dynamically
-        spec = importlib.util.spec_from_file_location(
-            f"skill_injection_{self.name}",
-            self.injection_path
-        )
-        if spec is None or spec.loader is None:
-            raise SkillInjectionError(f"Failed to load injection module for skill '{self.name}'")
-
-        try:
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-        except Exception as e:
-            raise SkillInjectionError(f"Error loading injection module for skill '{self.name}': {e}")
-
-        # Get exports from __exports__ list
-        if not hasattr(module, "__exports__"):
-            raise SkillInjectionError(f"Missing __exports__ in injection module for skill '{self.name}'")
-
-        exports = module.__exports__
-
-        # Collect Function, Variable, and Type instances
-        functions = []
-        variables = []
-        types = []
-
-        for obj in exports:
-            if isinstance(obj, Function):
-                functions.append(obj)
-            elif isinstance(obj, Variable):
-                variables.append(obj)
-            elif isinstance(obj, Type):
-                types.append(obj)
-
-        self._injection = SkillInjection(functions=functions, variables=variables, types=types)
+    def __repr__(self) -> str:
+        return f"Skill(name={self.name!r}, description={self.description!r})"
