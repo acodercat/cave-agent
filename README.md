@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/acodercat/cave-agent/raw/master/banner.png" alt="CaveAgent">
+  <img src="https://github.com/acodercat/cave-agent/raw/master/images/banner.png" alt="CaveAgent">
 </p>
 
 <h3 align="center">
@@ -24,6 +24,10 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 - **Inject** any Python object into the runtime—DataFrames, models, database connections, custom class instances—as first-class variables the LLM can manipulate
 - **Persist** state across turns without serialization; objects live in the runtime, not in the context window
 - **Retrieve** manipulated objects back as native Python types for downstream
+
+<p align="center">
+  <img src="https://github.com/acodercat/cave-agent/raw/master/images/overall.png" alt="CaveAgent Architecture">
+</p>
 
 ## Table of Contents
 
@@ -173,6 +177,7 @@ rules = [
     ImportRule({"os", "subprocess", "sys"}),
     FunctionRule({"eval", "exec", "open"}),
     AttributeRule({"__globals__", "__builtins__"}),
+    RegexRule([r"rm\s+-rf", r"sudo\s+"]),
 ]
 runtime = PythonRuntime(security_checker=SecurityChecker(rules))
 ```
@@ -189,6 +194,10 @@ runtime = PythonRuntime(security_checker=SecurityChecker(rules))
 ## Agent Skills
 
 CaveAgent implements the [Agent Skills](https://agentskills.io) open standard—a portable format for packaging instructions that agents can discover and use. Originally developed by Anthropic and now supported across the AI ecosystem (Claude, Gemini CLI, Cursor, VS Code, and more), Skills enable agents to acquire domain expertise on-demand.
+
+<p align="center">
+  <img src="https://github.com/acodercat/cave-agent/raw/master/images/skills.png" alt="Agent Skills Architecture">
+</p>
 
 ### Creating a Skill
 
@@ -235,6 +244,7 @@ Skills use progressive disclosure to minimize context usage:
 ### Using Skills
 
 ```python
+from pathlib import Path
 from cave_agent import CaveAgent, Skill
 from cave_agent.skills import SkillDiscovery
 from cave_agent.runtime import Function, Variable
@@ -250,11 +260,11 @@ skill = Skill(
 agent = CaveAgent(model=model, skills=[skill])
 
 # Or load from files
-skill = SkillDiscovery.from_file("./my-skill/SKILL.md")
+skill = SkillDiscovery.from_file(Path("./my-skill/SKILL.md"))
 agent = CaveAgent(model=model, skills=[skill])
 
 # Or load from directory
-skills = SkillDiscovery.from_directory("./skills")
+skills = SkillDiscovery.from_directory(Path("./skills"))
 agent = CaveAgent(model=model, skills=skills)
 ```
 
