@@ -88,7 +88,7 @@ async def main():
     )
     agent = CaveAgent(model, runtime=runtime)
     response = await agent.run("Reverse the secret")
-    print(runtime.retrieve("greeting"))  # Hello, world!
+    print(runtime.retrieve("secret"))  # Hello, world!
     print(response.content)              # Agent's text response
 
 asyncio.run(main())
