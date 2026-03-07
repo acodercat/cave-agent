@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="title" content="CaveAgent: Transforming LLMs into Stateful Runtime Operators">
+  <meta name="description" content="CaveAgent introduces Stateful Runtime Management for LLM agents, achieving +10.5% success rate and 28.4% token reduction through persistent Python runtime with direct variable injection and retrieval.">
+  <meta name="keywords" content="LLM, agent, function calling, stateful runtime, code generation, tool use, CaveAgent">
+  <meta name="author" content="Maohao Ran, Zhenglin Wan, Cooper Lin, Yanting Zhang">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="CaveAgent: Transforming LLMs into Stateful Runtime Operators">
+  <meta property="og:description" content="CaveAgent shifts LLM tool use from text-generator to runtime-operator with persistent Python environments.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="citation_title" content="CaveAgent: Transforming LLMs into Stateful Runtime Operators">
+  <meta name="citation_author" content="Ran, Maohao">
+  <meta name="citation_author" content="Wan, Zhenglin">
+  <meta name="citation_publication_date" content="2026">
+  <meta name="citation_pdf_url" content="https://arxiv.org/pdf/2601.01569.pdf">
+
+  <title>CaveAgent: Transforming LLMs into Stateful Runtime Operators</title>
+
+  <link rel="icon" type="image/png" href="static/images/logo.png">
+  <link rel="stylesheet" href="static/css/bulma.min.css">
+  <link rel="stylesheet" href="static/css/index.css">
+  <link rel="stylesheet" href="static/css/caveagent.css">
+  <link rel="preload" href="static/css/bulma-carousel.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="preload" href="static/css/bulma-slider.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="preload" href="static/css/fontawesome.all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="preload" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="stylesheet" href="static/css/prism-tomorrow.min.css">
+  <noscript>
+    <link rel="stylesheet" href="static/css/bulma-carousel.min.css">
+    <link rel="stylesheet" href="static/css/bulma-slider.min.css">
+    <link rel="stylesheet" href="static/css/fontawesome.all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  </noscript>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <script defer src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script defer src="static/js/fontawesome.all.min.js"></script>
+  <script defer src="static/js/bulma-carousel.min.js"></script>
+  <script defer src="static/js/bulma-slider.min.js"></script>
+  <script defer src="static/js/prism.min.js"></script>
+  <script defer src="static/js/prism-python.min.js"></script>
+  <script defer src="static/js/index.js"></script>
+  <script defer src="static/js/caveagent.js"></script>
+</head>
+<body>
+
+<!-- ==================== SECTION 1: HERO ==================== -->
+<section class="hero">
+  <div class="hero-body">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered">
+        <div class="column has-text-centered">
+          <!-- Logo -->
+          <div class="publication-logo">
+            <img src="static/images/logo.png" alt="CaveAgent Logo" style="max-height: 120px; margin-bottom: 1rem;">
+          </div>
+
+          <h1 class="title is-1 publication-title">CaveAgent: Transforming LLMs into Stateful Runtime Operators</h1>
+
+          <p class="subtitle is-4" style="margin-bottom: 1.5rem; color: #666; font-style: italic;">
+            "From text-in-text-out to (text&amp;object)-in-(text&amp;object)-out"
+          </p>
+
+          <!-- Authors -->
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">Maohao Ran<sup>*1,2</sup>,</span>
+            <span class="author-block">Zhenglin Wan<sup>*1,3</sup>,</span>
+            <span class="author-block">Cooper Lin<sup>4</sup>,</span>
+            <span class="author-block">Yanting Zhang<sup>1</sup>,</span>
+            <span class="author-block">Hongyu Xin<sup>1</sup>,</span>
+            <span class="author-block">Hongwei Fan<sup>7</sup>,</span>
+            <span class="author-block">Yibo Xu<sup>1</sup>,</span>
+            <span class="author-block">Beier Luo<sup>4</sup>,</span>
+            <span class="author-block">Yaxin Zhou<sup>5</sup>,</span>
+            <span class="author-block">Wangbo Zhao<sup>3</sup>,</span>
+            <span class="author-block">Lijie Yang<sup>8</sup>,</span>
+            <span class="author-block">Lang Feng<sup>6</sup>,</span>
+            <span class="author-block">Fuchao Yang<sup>6</sup>,</span>
+            <span class="author-block">Jingxuan Wu<sup>9</sup>,</span>
+            <span class="author-block">Yiqiao Huang<sup>10</sup>,</span>
+            <span class="author-block">Chendong Ma<sup>2</sup>,</span>
+            <span class="author-block">Dailing Jiang<sup>2</sup>,</span>
+            <span class="author-block">Jianbo Deng<sup>1</sup>,</span>
+            <span class="author-block">Sirui Han<sup>1</sup>,</span>
+            <span class="author-block">Yang You<sup>3</sup>,</span>
+            <span class="author-block">Bo An<sup>6</sup>,</span>
+            <span class="author-block">Yike Guo<sup>1</sup>,</span>
+            <span class="author-block">Jun Song<sup>&dagger;1,2</sup></span>
+          </div>
+
+          <!-- Affiliations -->
+          <div class="is-size-6 publication-authors" style="margin-top: 0.5rem;">
+            <span class="author-block"><sup>1</sup>HKUST</span>&nbsp;
+            <span class="author-block"><sup>2</sup>HKBU</span>&nbsp;
+            <span class="author-block"><sup>3</sup>NUS</span>&nbsp;
+            <span class="author-block"><sup>4</sup>HKU</span>&nbsp;
+            <span class="author-block"><sup>5</sup>CMU</span>&nbsp;
+            <span class="author-block"><sup>6</sup>NTU, Singapore</span>&nbsp;
+            <span class="author-block"><sup>7</sup>Imperial College London</span>&nbsp;
+            <span class="author-block"><sup>8</sup>Princeton</span>&nbsp;
+            <span class="author-block"><sup>9</sup>UNC, Chapel Hill</span>&nbsp;
+            <span class="author-block"><sup>10</sup>Harvard</span>
+          </div>
+          <div class="is-size-7" style="margin-top: 0.3rem; color: #888;">
+            <sup>*</sup>Equal Contribution &nbsp; <sup>&dagger;</sup>Corresponding Author
+          </div>
+
+          <!-- Institution Logos -->
+          <div class="institution-logos" style="margin-top: 1rem; display: flex; justify-content: center; align-items: center; gap: 1rem; flex-wrap: wrap;">
+            <img src="static/images/institution_logos/hkgai_logo.png" alt="HKGAI" style="height: 35px;">
+            <img src="static/images/institution_logos/hkbu_logo.png" alt="HKBU" style="height: 35px;">
+            <img src="static/images/institution_logos/nus_logo.png" alt="NUS" style="height: 35px;">
+            <img src="static/images/institution_logos/hku_logo.png" alt="HKU" style="height: 35px;">
+            <img src="static/images/institution_logos/ntu_logo_color.png" alt="NTU" style="height: 35px;">
+          </div>
+
+          <!-- Links -->
+          <div class="column has-text-centered" style="margin-top: 1rem;">
+            <div class="publication-links">
+              <span class="link-block">
+                <a href="https://arxiv.org/pdf/2601.01569.pdf" target="_blank" class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon"><i class="fas fa-file-pdf"></i></span>
+                  <span>Paper</span>
+                </a>
+              </span>
+              <span class="link-block">
+                <a href="https://github.com/acodercat/cave-agent" target="_blank" class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon"><i class="fab fa-github"></i></span>
+                  <span>Code</span>
+                </a>
+              </span>
+              <span class="link-block">
+                <a href="https://arxiv.org/abs/2601.01569" target="_blank" class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon"><i class="ai ai-arxiv"></i></span>
+                  <span>arXiv</span>
+                </a>
+              </span>
+              <span class="link-block">
+                <a href="https://pypi.org/project/cave-agent" target="_blank" class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon"><i class="fas fa-cube"></i></span>
+                  <span>PyPI</span>
+                </a>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION 2: TEASER + ABSTRACT ==================== -->
+<section class="hero teaser">
+  <div class="container is-max-desktop">
+    <div class="hero-body">
+      <img src="static/images/framework.png" alt="CaveAgent Dual-Stream Architecture" style="width: 100%; border: 1px solid #ddd; border-radius: 4px;">
+      <h2 class="subtitle has-text-centered" style="margin-top: 1rem;">
+        <strong>CaveAgent Dual-Stream Architecture:</strong> Semantic Stream for lightweight reasoning, Runtime Stream for persistent state &amp; data management.
+      </h2>
+    </div>
+  </div>
+</section>
+
+<section class="section hero is-light">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Abstract</h2>
+        <div class="content has-text-justified">
+          <p>
+            LLM-based agents are increasingly capable of complex task execution, yet current agentic systems remain constrained by text-centric paradigms that struggle with long-horizon tasks due to fragile multi-turn dependencies and context drift. We present <strong>CaveAgent</strong>, a framework that shifts LLM tool use from "LLM-as-Text-Generator" to "LLM-as-Runtime-Operator." CaveAgent introduces a dual-stream architecture: a <em>semantic stream</em> for lightweight reasoning and a <em>runtime stream</em> backed by a persistent Python environment for stateful execution.
+          </p>
+          <p>
+            Rather than treating the LLM's text context as the primary workspace, CaveAgent elevates the persistent runtime as the central locus. Beyond leveraging code generation to resolve interdependent sub-tasks in a single step, CaveAgent introduces <strong>Stateful Runtime Management</strong>: it injects, manipulates, and retrieves complex Python objects (e.g., DataFrames, database connections) that persist across turns. CaveAgent further provides a runtime-integrated skill management system that extends the Agent Skills open standard.
+          </p>
+          <p>
+            Evaluations on Tau<sup>2</sup>-bench and BFCL across six SOTA LLMs demonstrate consistent improvements: <strong>+10.5% success rate</strong> on retail tasks, <strong>28.4% reduction</strong> in total token consumption, and <strong>59% token reduction</strong> on data-intensive tasks. The accessible runtime state further provides programmatically verifiable feedback, enabling automated evaluation and reward signal generation for Reinforcement Learning with Verifiable Rewards (RLVR).
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION 3: HOW CAVEAGENT WORKS ==================== -->
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">How CaveAgent Works</h2>
+    <p class="subtitle has-text-centered">Click each step or press "Play All" to see the dual-stream architecture in action.</p>
+
+    <!-- Step Controls -->
+    <div class="has-text-centered" style="margin-bottom: 2rem;">
+      <button class="button is-rounded is-info" onclick="dualStreamPlay()" id="ds-play-btn">
+        <span class="icon"><i class="fas fa-play"></i></span><span>Play All</span>
+      </button>
+      <div class="buttons is-centered" style="margin-top: 0.5rem; display: inline-flex; gap: 0.5rem;">
+        <button class="button is-rounded is-small is-outlined" onclick="dualStreamGoTo(0)">Step 1</button>
+        <button class="button is-rounded is-small is-outlined" onclick="dualStreamGoTo(1)">Step 2</button>
+        <button class="button is-rounded is-small is-outlined" onclick="dualStreamGoTo(2)">Step 3</button>
+        <button class="button is-rounded is-small is-outlined" onclick="dualStreamGoTo(3)">Step 4</button>
+      </div>
+    </div>
+
+    <!-- Dual Stream Columns -->
+    <div class="columns">
+      <!-- Semantic Stream (left) -->
+      <div class="column is-half">
+        <div class="box ds-stream ds-semantic" id="ds-semantic">
+          <h4 class="title is-5" style="color: #2563eb;">Semantic Stream</h4>
+          <p class="ds-label">Reasoning &amp; Intent</p>
+          <div class="ds-content" id="ds-semantic-content">
+            <p class="has-text-grey-light">Press "Play All" or click a step to begin...</p>
+          </div>
+        </div>
+      </div>
+      <!-- Runtime Stream (right) -->
+      <div class="column is-half">
+        <div class="box ds-stream ds-runtime" id="ds-runtime">
+          <h4 class="title is-5" style="color: #059669;">Runtime Stream</h4>
+          <p class="ds-label">Persistent State &amp; Data</p>
+          <div class="ds-content" id="ds-runtime-content">
+            <p class="has-text-grey-light">Waiting for initialization...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow / status bar -->
+    <div class="has-text-centered">
+      <div class="ds-status" id="ds-status">
+        <span class="tag is-medium is-light">Ready</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION 4: SMART HOME WALKTHROUGH ==================== -->
+<section class="section hero is-light">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">Stateful Runtime in Action: Smart Home</h2>
+    <p class="subtitle has-text-centered">Click each turn to see how CaveAgent maintains persistent state across interactions.</p>
+
+    <!-- Turn Tabs -->
+    <div class="tabs is-centered is-boxed is-medium" id="sh-tabs">
+      <ul>
+        <li class="is-active" onclick="shGoTo(0)"><a>Initial State</a></li>
+        <li onclick="shGoTo(1)"><a>Turn 1: Morning Wake</a></li>
+        <li onclick="shGoTo(2)"><a>Turn 2: Leave Home</a></li>
+        <li onclick="shGoTo(3)"><a>Turn 3: Return Home</a></li>
+      </ul>
+    </div>
+
+    <!-- Semantic area: user query + code -->
+    <div class="box" id="sh-semantic" style="margin-bottom: 1.5rem;">
+      <div id="sh-semantic-content"></div>
+    </div>
+
+    <!-- Runtime area: device cards -->
+    <div class="columns is-multiline" id="sh-devices">
+      <div class="column is-3">
+        <div class="box has-text-centered sh-device" id="sh-thermostat">
+          <p class="sh-device-icon" id="sh-thermostat-icon">&#x1F321;&#xFE0F;</p>
+          <p class="sh-device-name">Thermostat</p>
+          <p class="sh-device-value" id="sh-thermostat-value">18&deg;C</p>
+        </div>
+      </div>
+      <div class="column is-3">
+        <div class="box has-text-centered sh-device" id="sh-door">
+          <p class="sh-device-icon" id="sh-door-icon">&#x1F512;</p>
+          <p class="sh-device-name">Door</p>
+          <p class="sh-device-value" id="sh-door-value">Locked</p>
+        </div>
+      </div>
+      <div class="column is-3">
+        <div class="box has-text-centered sh-device" id="sh-lights">
+          <p class="sh-device-icon" id="sh-lights-icon">&#x1F4A1;</p>
+          <p class="sh-device-name">Lights</p>
+          <p class="sh-device-value" id="sh-lights-value">Off</p>
+        </div>
+      </div>
+      <div class="column is-3">
+        <div class="box has-text-centered sh-device" id="sh-camera">
+          <p class="sh-device-icon" id="sh-camera-icon">&#x1F4F7;</p>
+          <p class="sh-device-name">Camera</p>
+          <p class="sh-device-value" id="sh-camera-value">Off</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION 5: IMAGE CAROUSEL ==================== -->
+<section class="hero is-small">
+  <div class="hero-body">
+    <div class="container">
+      <h2 class="title is-3 has-text-centered">Applications &amp; Case Studies</h2>
+      <div id="results-carousel" class="carousel results-carousel">
+        <div class="item">
+          <img src="static/images/downstream_applications.png" alt="Key advantages of CaveAgent" loading="lazy"/>
+          <h2 class="subtitle has-text-centered">Key Advantages: UI Rendering, Validation, RL Rewards, Multi-Agent Handoff, Benchmarking</h2>
+        </div>
+        <div class="item">
+          <img src="static/images/town_simulation.png" alt="Multi-agent town simulation" loading="lazy"/>
+          <h2 class="subtitle has-text-centered">Town Simulation: Stateful Runtime-Mediated Multi-Agent Collaboration</h2>
+        </div>
+        <div class="item">
+          <img src="static/images/skills.png" alt="Agent Skills architecture" loading="lazy"/>
+          <h2 class="subtitle has-text-centered">Agent Skills: Runtime-integrated skill management extending the open standard</h2>
+        </div>
+        <div class="item">
+          <img src="static/images/automl.png" alt="AutoML multi-agent case study" loading="lazy"/>
+          <h2 class="subtitle has-text-centered">AutoML: Multi-Agent Coordination for automated machine learning pipelines</h2>
+        </div>
+        <div class="item">
+          <img src="static/images/geospatial.png" alt="Geospatial analysis case study" loading="lazy"/>
+          <h2 class="subtitle has-text-centered">Geospatial Analysis: Complex data processing with persistent runtime state</h2>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION 6: EXPERIMENTAL RESULTS ==================== -->
+<section class="section hero is-light">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">Experimental Results</h2>
+
+    <!-- Tabs -->
+    <div class="tabs is-centered is-boxed" id="results-tabs">
+      <ul>
+        <li class="is-active" onclick="resultsTab(0)"><a>Tau&sup2;-Bench</a></li>
+        <li onclick="resultsTab(1)"><a>Token Efficiency</a></li>
+        <li onclick="resultsTab(2)"><a>Type Proficiency</a></li>
+        <li onclick="resultsTab(3)"><a>Multi-Turn Analysis</a></li>
+      </ul>
+    </div>
+
+    <!-- Tab content panels -->
+    <div class="results-panel" id="results-panel-0">
+      <p class="has-text-centered" style="margin-bottom: 1rem;">
+        Performance on <strong>Tau<sup>2</sup>-bench (Retail domain)</strong> across 6 SOTA LLMs. CaveAgent achieves <strong>+10.5% average success rate improvement</strong>.
+      </p>
+      <div class="table-container">
+        <table class="table is-striped is-hoverable is-fullwidth">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Baseline SR</th>
+              <th>CaveAgent SR</th>
+              <th>Improvement</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>GPT-4o</td><td>31.0%</td><td>37.0%</td><td class="has-text-success has-text-weight-bold">+6.0%</td></tr>
+            <tr><td>Claude 3.5 Sonnet</td><td>28.5%</td><td>40.5%</td><td class="has-text-success has-text-weight-bold">+12.0%</td></tr>
+            <tr><td>Gemini 2.0 Flash</td><td>21.5%</td><td>31.5%</td><td class="has-text-success has-text-weight-bold">+10.0%</td></tr>
+            <tr><td>Gemini 2.5 Pro</td><td>38.5%</td><td>46.5%</td><td class="has-text-success has-text-weight-bold">+8.0%</td></tr>
+            <tr><td>DeepSeek-V3</td><td>20.5%</td><td>33.5%</td><td class="has-text-success has-text-weight-bold">+13.0%</td></tr>
+            <tr><td>Qwen 2.5 72B</td><td>19.0%</td><td>33.0%</td><td class="has-text-success has-text-weight-bold">+14.0%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="has-text-centered has-text-grey"><em>SR = Success Rate. Full results including Airline domain available in the paper.</em></p>
+    </div>
+
+    <div class="results-panel" id="results-panel-1" style="display:none;">
+      <p class="has-text-centered" style="margin-bottom: 1rem;">
+        CaveAgent achieves <strong>28.4% reduction</strong> in total token consumption and <strong>59% reduction</strong> on data-intensive tasks by delegating state to the persistent runtime.
+      </p>
+      <div class="has-text-centered">
+        <img src="static/images/token_consumption.png" alt="Token consumption comparison" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;" loading="lazy">
+      </div>
+    </div>
+
+    <div class="results-panel" id="results-panel-2" style="display:none;">
+      <p class="has-text-centered" style="margin-bottom: 1rem;">
+        Type proficiency radar chart across multiple data types showing CaveAgent's consistent advantage.
+      </p>
+      <div class="has-text-centered">
+        <img src="static/images/type_proficiency_multi_radar.png" alt="Type proficiency radar chart" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;" loading="lazy">
+      </div>
+    </div>
+
+    <div class="results-panel" id="results-panel-3" style="display:none;">
+      <p class="has-text-centered" style="margin-bottom: 1rem;">
+        Multi-turn interaction analysis showing improved state consistency across conversation turns.
+      </p>
+      <div class="has-text-centered">
+        <img src="static/images/multi_turn_bar.png" alt="Multi-turn analysis bar chart" style="max-width: 100%; border: 1px solid #ddd; border-radius: 4px;" loading="lazy">
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION 7: GET STARTED ==================== -->
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">Get Started</h2>
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
+        <div class="box">
+          <h4 class="title is-5">Installation</h4>
+          <div style="position: relative;">
+            <pre><code class="language-python">pip install 'cave-agent[all]'</code></pre>
+          </div>
+
+          <h4 class="title is-5" style="margin-top: 1.5rem;">Hello World</h4>
+          <pre><code class="language-python">import asyncio
+from cave_agent import CaveAgent
+from cave_agent.runtime import PythonRuntime, Variable, Function
+from cave_agent.models import LiteLLMModel
+
+model = LiteLLMModel(
+    model_id="model-id",
+    api_key="your-api-key",
+    custom_llm_provider="openai"
+)
+
+async def main():
+    def reverse(s: str) -> str:
+        """Reverse a string"""
+        return s[::-1]
+
+    runtime = PythonRuntime(
+        variables=[
+            Variable("secret", "!dlrow ,olleH", "A reversed message"),
+            Variable("greeting", "", "Store the reversed message"),
+        ],
+        functions=[Function(reverse)],
+    )
+    agent = CaveAgent(model, runtime=runtime)
+    response = await agent.run("Reverse the secret")
+    print(runtime.retrieve("greeting"))  # Hello, world!
+
+asyncio.run(main())</code></pre>
+        </div>
+
+        <div class="has-text-centered" style="margin-top: 1.5rem;">
+          <a href="https://github.com/acodercat/cave-agent" target="_blank" class="button is-rounded is-dark">
+            <span class="icon"><i class="fab fa-github"></i></span>
+            <span>Full Documentation</span>
+          </a>
+          <a href="https://pypi.org/project/cave-agent" target="_blank" class="button is-rounded is-outlined">
+            <span class="icon"><i class="fas fa-cube"></i></span>
+            <span>PyPI Package</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION 8: BIBTEX + FOOTER ==================== -->
+<section class="section" id="BibTeX">
+  <div class="container is-max-desktop content">
+    <div class="bibtex-header">
+      <h2 class="title">BibTeX</h2>
+      <button class="copy-bibtex-btn" onclick="copyBibTeX()" title="Copy BibTeX to clipboard">
+        <i class="fas fa-copy"></i>
+        <span class="copy-text">Copy</span>
+      </button>
+    </div>
+    <pre id="bibtex-code"><code>@article{ran2026caveagent,
+  title={CaveAgent: Transforming LLMs into Stateful Runtime Operators},
+  author={Ran, Maohao and Wan, Zhenglin and Lin, Cooper and Zhang, Yanting and others},
+  journal={arXiv preprint arXiv:2601.01569},
+  year={2026}
+}</code></pre>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="columns is-centered">
+      <div class="column is-8">
+        <div class="content has-text-centered">
+          <p>
+            This page was built using the <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank">Academic Project Page Template</a>.
+            Licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank">CC BY-SA 4.0</a>.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

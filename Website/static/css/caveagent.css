@@ -1,0 +1,162 @@
+/* ===== Dual-Stream Animation ===== */
+.ds-stream {
+  min-height: 280px;
+  transition: all 0.4s ease;
+  position: relative;
+  overflow: hidden;
+}
+.ds-semantic {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-left: 4px solid #2563eb;
+}
+.ds-runtime {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border-left: 4px solid #059669;
+}
+.ds-stream.ds-active {
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+  transform: scale(1.02);
+}
+.ds-runtime.ds-active {
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.3);
+}
+.ds-label {
+  font-size: 0.85rem;
+  color: #6b7280;
+  margin-bottom: 1rem;
+}
+.ds-content {
+  transition: opacity 0.3s ease;
+}
+.ds-content .ds-step {
+  animation: dsFadeIn 0.5s ease forwards;
+  opacity: 0;
+}
+@keyframes dsFadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ds-content pre {
+  background: rgba(0,0,0,0.05);
+  padding: 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  overflow-x: auto;
+}
+.ds-content .ds-user-query {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.ds-content .ds-var {
+  display: inline-block;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  margin: 0.25rem;
+  font-family: monospace;
+  font-size: 0.85rem;
+  transition: all 0.3s ease;
+}
+.ds-content .ds-var.ds-updated {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  transform: scale(1.05);
+}
+.ds-status {
+  margin-top: 1rem;
+}
+
+/* Step button active state */
+.ds-step-active {
+  background-color: #2563eb !important;
+  color: white !important;
+  border-color: #2563eb !important;
+}
+
+/* ===== Smart Home Walkthrough ===== */
+.sh-device {
+  transition: all 0.4s ease;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.sh-device-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+  transition: all 0.3s ease;
+}
+.sh-device-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #374151;
+}
+.sh-device-value {
+  font-family: monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-top: 0.25rem;
+  transition: all 0.3s ease;
+}
+.sh-device.sh-on {
+  background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+  border: 2px solid #059669;
+}
+.sh-device.sh-off {
+  background: #f9fafb;
+  border: 2px solid #e5e7eb;
+}
+.sh-device.sh-changed {
+  animation: shPulse 0.6s ease;
+}
+@keyframes shPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+#sh-tabs ul li {
+  cursor: pointer;
+}
+#sh-tabs ul li.is-active a {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+/* ===== Result Tabs ===== */
+#results-tabs ul li {
+  cursor: pointer;
+}
+#results-tabs ul li.is-active a {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+.results-panel {
+  animation: dsFadeIn 0.3s ease;
+}
+
+/* ===== Responsive ===== */
+@media screen and (max-width: 768px) {
+  .ds-stream {
+    min-height: 200px;
+  }
+  .sh-device {
+    min-height: 120px;
+  }
+  .sh-device-icon {
+    font-size: 1.8rem;
+  }
+  .institution-logos img {
+    height: 25px !important;
+  }
+  #sh-tabs .tabs ul {
+    flex-wrap: wrap;
+  }
+  #sh-tabs .tabs ul li {
+    font-size: 0.8rem;
+  }
+}
