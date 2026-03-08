@@ -235,7 +235,7 @@ runtime = PythonRuntime(security_checker=SecurityChecker(rules))
 CaveAgent implements the [Agent Skills](https://agentskills.io) open standard—a portable format for packaging instructions that agents can discover and use. Originally developed by Anthropic and now supported across the AI ecosystem (Claude, Gemini CLI, Cursor, VS Code, and more), Skills enable agents to acquire domain expertise on-demand.
 
 <p align="center">
-  <img src="https://github.com/acodercat/cave-agent/raw/master/images/skills.png" alt="Agent Skills Architecture">
+  <img src="https://github.com/acodercat/cave-agent/raw/master/images/skills.png" alt="Agent Skills Architecture" width="85%">
 </p>
 
 ### Creating a Skill
