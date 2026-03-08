@@ -7,6 +7,7 @@
 </h3>
 
 <p align="center">
+  <a href="https://caveagent.dev"><img src="https://img.shields.io/badge/-Website-brightgreen?style=flat-square&logo=googlechrome&logoColor=white" alt="Website"></a>
   <a href="https://arxiv.org/abs/2601.01569"><img src="https://img.shields.io/badge/arXiv-Paper-red?style=flat-square&logo=arxiv" alt="arXiv Paper"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat-square" alt="Python 3.11+"></a>
@@ -34,6 +35,7 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 - [Installation](#installation)
 - [Hello World](#hello-world)
 - [Examples](#examples)
+  - [Data Visualization](#data-visualization)
   - [Function Calling](#function-calling)
   - [Stateful Object Interactions](#stateful-object-interactions)
   - [Multi-Agent Coordination](#multi-agent-coordination)
@@ -95,6 +97,43 @@ asyncio.run(main())
 ```
 
 ## Examples
+
+### Data Visualization
+
+```python
+from cave_agent import CaveAgent
+from cave_agent.runtime import PythonRuntime, Variable
+from cave_agent.models import LiteLLMModel
+
+model = LiteLLMModel(model_id="model-id", api_key="your-api-key", custom_llm_provider="openai")
+
+# 1. Inject — real DB connection & chart config manager
+runtime = PythonRuntime(
+    variables=[
+        Variable("engine", database_engine),             # SQLAlchemy Engine
+        Variable("echarts_config_manager", EChartsConfigManager()),  # Chart collector
+    ]
+)
+agent = CaveAgent(model, runtime=runtime)
+
+# 2. Query — LLM sees object types, not data
+await agent.run("Show me the air quality trend for the past week")
+
+# LLM generates & executes:
+#   df = pd.read_sql("SELECT * FROM air_quality WHERE ...", engine)
+#   echarts_config_manager.add_config({
+#       "title": {"text": "Air Quality - Past Week"},
+#       "xAxis": {"data": dates},
+#       "series": [{"name": "PM2.5", "type": "line", "data": ...}]
+#   })
+
+# 3. Retrieve — get real chart configs for rendering
+mgr = runtime.retrieve("echarts_config_manager")  # Real Python object
+configs = mgr.get_configs()
+
+for config in configs:
+    render_echarts(config)  # Render directly in web UI
+```
 
 ### Function Calling
 
