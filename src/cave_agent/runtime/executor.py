@@ -30,7 +30,7 @@ class ErrorFeedbackMode(Enum):
     MINIMAL = "Minimal"     # Brief error info for agent efficiency
 
 
-class PythonExecutor:
+class IPythonExecutor:
     """
     Handles Python code execution using IPython.
     """
@@ -38,7 +38,7 @@ class PythonExecutor:
     def __init__(self, security_checker: Optional[SecurityChecker] = None, error_feedback_mode: ErrorFeedbackMode = ErrorFeedbackMode.PLAIN):
         """Initialize IPython shell for code execution."""
         ipython_config = self.create_ipython_config(error_feedback_mode=error_feedback_mode)
-        self._shell = InteractiveShell(config=ipython_config)
+        self._shell = InteractiveShell.instance(config=ipython_config)
         self._security_checker = security_checker
 
     def inject_into_namespace(self, name: str, value: Any):
@@ -92,7 +92,7 @@ class PythonExecutor:
         except Exception as e:
             return ExecutionResult(error=e)
 
-    def get_from_namespace(self, name: str) -> Any:
+    async def get_from_namespace(self, name: str) -> Any:
         """Get a value from the execution namespace."""
         return self._shell.user_ns.get(name)
 

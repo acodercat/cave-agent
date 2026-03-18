@@ -1,6 +1,6 @@
 from cave_agent import CaveAgent
 from cave_agent.models import LiteLLMModel
-from cave_agent.runtime import PythonRuntime, Function, Variable, Type
+from cave_agent.runtime import IPythonRuntime, Function, Variable, Type
 import os
 import asyncio
 
@@ -42,7 +42,7 @@ async def main():
     multiply_func = Function(multiply)
     
     # Create runtime with functions
-    runtime1 = PythonRuntime(
+    runtime1 = IPythonRuntime(
         functions=[add_func, multiply_func]
     )
     
@@ -81,7 +81,7 @@ async def main():
 
     
     # Create runtime with functions and variables
-    runtime2 = PythonRuntime(
+    runtime2 = IPythonRuntime(
         functions=[calc_sum_func],
         variables=[processor_var, numbers_var, result_var],
         types=[Type(DataProcessor)]
@@ -101,7 +101,7 @@ async def main():
     print("\n=== usage 3: Streaming Events ===")
     
     # Create a simple runtime for streaming usage
-    runtime3 = PythonRuntime(
+    runtime3 = IPythonRuntime(
         functions=[Function(add), Function(multiply)]
     )
     agent3 = CaveAgent(model, runtime=runtime3)

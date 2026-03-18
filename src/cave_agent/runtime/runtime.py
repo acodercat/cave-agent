@@ -1,47 +1,39 @@
-from typing import (
-    Callable, List, Dict, Any, Optional,
-    get_args, get_origin, ForwardRef
-)
 import inspect
+from types import NoneType
+from typing import Any, Callable, ForwardRef, get_args, get_origin
 
-from .executor import PythonExecutor, ExecutionResult, ErrorFeedbackMode
+from .executor import ExecutionResult
 from .primitives import Variable, Function, Type
-from ..security import SecurityChecker
 
 
-class PythonRuntime:
+class Runtime:
     """
-    A Python runtime that executes code snippets in an IPython environment.
-    Provides a controlled execution environment with registered functions, variables, and types.
-    """
+    Base class for Python runtimes that execute code snippets.
 
-    _executor: PythonExecutor
-    _functions: Dict[str, Function]
-    _variables: Dict[str, Variable]
-    _types: Dict[str, Type]
+    Manages metadata (functions, variables, types) and delegates
+    execution to ``self._executor`` which subclasses must set
+    before calling ``super().__init__()``.
+    """
 
     def __init__(
         self,
-        functions: Optional[List[Function]] = None,
-        variables: Optional[List[Variable]] = None,
-        types: Optional[List[Type]] = None,
-        security_checker: Optional[SecurityChecker] = None,
-        error_feedback_mode: ErrorFeedbackMode = ErrorFeedbackMode.PLAIN,
+        functions: list[Function] | None = None,
+        variables: list[Variable] | None = None,
+        types: list[Type] | None = None,
     ):
         """
-        Initialize runtime with executor and optional initial resources.
+        Initialize runtime with optional initial resources.
+
+        Subclasses must set ``self._executor`` before calling this.
 
         Args:
             functions: List of functions to inject into runtime
             variables: List of variables to inject into runtime
             types: List of types/classes to inject into runtime
-            security_checker: Security checker instance to use for code execution
-            error_feedback_mode: Error feedback mode for execution errors
         """
-        self._executor = PythonExecutor(security_checker=security_checker, error_feedback_mode=error_feedback_mode)
-        self._functions = {}
-        self._variables = {}
-        self._types = {}
+        self._functions: dict[str, Function] = {}
+        self._variables: dict[str, Variable] = {}
+        self._types: dict[str, Type] = {}
 
         # Inject explicit types first so they take precedence over auto-injection
         for type_obj in (types or []):
@@ -57,7 +49,7 @@ class PythonRuntime:
     _BUILTIN_TYPES = frozenset({
         str, int, float, bool, bytes, bytearray,
         list, dict, tuple, set, frozenset,
-        type(None), object, type,
+        NoneType, object, type,
     })
 
     def inject_function(self, function: Function):
@@ -185,7 +177,7 @@ class PythonRuntime:
 
     def _process_type_for_injection(self, type_hint: Any):
         """Process a type hint and inject any custom types found (schema hidden)."""
-        if type_hint is None or type_hint is type(None):
+        if type_hint is None or type_hint is NoneType:
             return
 
         # Handle ForwardRef and string annotations
@@ -197,7 +189,7 @@ class PythonRuntime:
         if origin is not None:
             # Process type arguments recursively
             for arg in get_args(type_hint):
-                if arg is not type(None):
+                if arg is not NoneType:
                     self._process_type_for_injection(arg)
             return
 
@@ -209,33 +201,23 @@ class PythonRuntime:
         """Execute code using the executor."""
         return await self._executor.execute(code)
 
-    def retrieve(self, name: str) -> Any:
+    async def retrieve(self, name: str) -> Any:
         """Get current value of a variable."""
         if name not in self._variables:
             raise KeyError(f"Variable '{name}' is not managed by this runtime. Available variables: {list(self._variables.keys())}")
-        return self._executor.get_from_namespace(name)
+        return await self._executor.get_from_namespace(name)
 
     def describe_variables(self) -> str:
         """Generate formatted variable descriptions for system prompt."""
         if not self._variables:
             return "No variables available"
-
-        descriptions = []
-        for variable in self._variables.values():
-            descriptions.append(str(variable))
-
-        return "\n".join(descriptions)
+        return "\n".join(str(v) for v in self._variables.values())
 
     def describe_functions(self) -> str:
         """Generate formatted function descriptions for system prompt."""
         if not self._functions:
             return "No functions available"
-
-        descriptions = []
-        for function in self._functions.values():
-            descriptions.append(str(function))
-
-        return "\n".join(descriptions)
+        return "\n".join(str(f) for f in self._functions.values())
 
     def describe_types(self) -> str:
         """

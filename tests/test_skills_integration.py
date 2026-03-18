@@ -6,11 +6,12 @@ Tests all skill features through natural language interactions:
 - Injection (functions, variables, types)
 """
 import pytest
+import pytest_asyncio
 from pathlib import Path
 
 from cave_agent import CaveAgent
 from cave_agent.skills import SkillDiscovery
-from cave_agent.runtime import PythonRuntime, Variable
+from cave_agent.runtime import IPythonRuntime, IPyKernelRuntime, Variable
 
 
 # =============================================================================
@@ -33,7 +34,7 @@ def data_analysis_skill(skills_dir):
 def agent_with_skills(model, skills_dir):
     """Create agent with skills loaded and placeholder variables for retrieval."""
     # Pre-inject variables that tests will use for storing results
-    runtime = PythonRuntime(
+    runtime = IPythonRuntime(
         variables=[
             Variable("instructions", description="Store skill instructions here"),
             Variable("stats", description="Store statistics results here"),
@@ -67,7 +68,7 @@ class TestSkillActivation:
             "Activate the 'data-analysis' skill and store the instructions in a variable called 'instructions'."
         )
 
-        instructions = agent_with_skills.runtime.retrieve('instructions')
+        instructions = await agent_with_skills.runtime.retrieve('instructions')
         assert instructions is not None
         assert "Data Analysis Skill" in instructions
         assert "calculate_stats" in instructions
@@ -88,7 +89,7 @@ class TestInjectedFunctions:
             "and store the result in a variable called 'stats'."
         )
 
-        stats = agent_with_skills.runtime.retrieve('stats')
+        stats = await agent_with_skills.runtime.retrieve('stats')
         assert stats is not None
         assert stats['mean'] == 30.0
         assert stats['median'] == 30
@@ -103,7 +104,7 @@ class TestInjectedFunctions:
             "Store the result in a variable called 'outliers'."
         )
 
-        outliers = agent_with_skills.runtime.retrieve('outliers')
+        outliers = await agent_with_skills.runtime.retrieve('outliers')
         assert outliers is not None
         assert 100 in outliers
 
@@ -122,7 +123,7 @@ class TestInjectedVariables:
             "Activate 'data-analysis' and copy the DATA_CONFIG variable to a new variable called 'config'."
         )
 
-        config = agent_with_skills.runtime.retrieve('config')
+        config = await agent_with_skills.runtime.retrieve('config')
         assert config is not None
         assert config['default_threshold'] == 1.5
         assert config['max_data_points'] == 10000
@@ -144,7 +145,7 @@ class TestInjectedTypes:
             "and label='test'. Store it in a variable called 'point'."
         )
 
-        point = agent_with_skills.runtime.retrieve('point')
+        point = await agent_with_skills.runtime.retrieve('point')
         assert point is not None
         assert point.value == 42.5
         assert point.label == 'test'
@@ -168,7 +169,7 @@ class TestMultiTurnWorkflow:
             "Use calculate_stats on [10, 20, 30, 40, 50] and store the result in 'stats'."
         )
 
-        stats = agent_with_skills.runtime.retrieve('stats')
+        stats = await agent_with_skills.runtime.retrieve('stats')
         assert stats is not None
         assert 'mean' in stats
         assert stats['mean'] == 30.0
@@ -184,8 +185,8 @@ class TestMultiTurnWorkflow:
             "4. Find any outliers using find_outliers and store in 'outliers'"
         )
 
-        stats = agent_with_skills.runtime.retrieve('stats')
-        outliers = agent_with_skills.runtime.retrieve('outliers')
+        stats = await agent_with_skills.runtime.retrieve('stats')
+        outliers = await agent_with_skills.runtime.retrieve('outliers')
 
         assert stats is not None
         assert 'mean' in stats
@@ -212,3 +213,100 @@ class TestErrorHandling:
         content = response.content.lower()
         # Should mention error or not found
         assert any(word in content for word in ["error", "not found", "available", "doesn't exist"])
+
+
+# =============================================================================
+# IPyKernelRuntime Integration Tests (LLM required)
+# =============================================================================
+
+
+@pytest_asyncio.fixture
+async def kernel_agent_with_skills(model, skills_dir):
+    """CaveAgent with skills using IPyKernelRuntime."""
+    runtime = IPyKernelRuntime(
+        variables=[
+            Variable("instructions", description="Store skill instructions here"),
+            Variable("stats", description="Store statistics results here"),
+            Variable("outliers", description="Store outliers list here"),
+            Variable("config", description="Store configuration here"),
+            Variable("point", description="Store DataPoint instance here"),
+        ]
+    )
+    await runtime.start()
+
+    skills = SkillDiscovery.from_directory(skills_dir)
+    agent = CaveAgent(model=model, skills=skills, runtime=runtime, max_steps=10)
+    yield agent
+    await runtime.stop()
+
+
+class TestIPyKernelSkillActivation:
+    """Test skill activation through agent.run() with IPyKernelRuntime."""
+
+    @pytest.mark.asyncio
+    async def test_activate_skill(self, kernel_agent_with_skills):
+        await kernel_agent_with_skills.run(
+            "Activate the 'data-analysis' skill and store the instructions in a variable called 'instructions'."
+        )
+        instructions = await kernel_agent_with_skills.runtime.retrieve("instructions")
+        assert instructions is not None
+        assert "Data Analysis Skill" in instructions
+        assert "calculate_stats" in instructions
+
+
+class TestIPyKernelInjectedFunctions:
+    """Test using injected functions through agent.run() with IPyKernelRuntime."""
+
+    @pytest.mark.asyncio
+    async def test_calculate_stats(self, kernel_agent_with_skills):
+        await kernel_agent_with_skills.run(
+            "Activate 'data-analysis', then use calculate_stats on [10, 20, 30, 40, 50] "
+            "and store the result in a variable called 'stats'."
+        )
+        stats = await kernel_agent_with_skills.runtime.retrieve("stats")
+        assert stats is not None
+        assert stats["mean"] == 30.0
+        assert stats["min"] == 10
+        assert stats["max"] == 50
+
+    @pytest.mark.asyncio
+    async def test_find_outliers(self, kernel_agent_with_skills):
+        await kernel_agent_with_skills.run(
+            "Activate 'data-analysis' and use find_outliers on [1, 2, 3, 4, 5, 100]. "
+            "Store the result in a variable called 'outliers'."
+        )
+        outliers = await kernel_agent_with_skills.runtime.retrieve("outliers")
+        assert outliers is not None
+        assert 100 in outliers
+
+
+class TestIPyKernelInjectedVariables:
+    """Test using injected variables through agent.run() with IPyKernelRuntime."""
+
+    @pytest.mark.asyncio
+    async def test_use_data_config(self, kernel_agent_with_skills):
+        await kernel_agent_with_skills.run(
+            "Activate 'data-analysis' and copy the DATA_CONFIG variable to a new variable called 'config'."
+        )
+        config = await kernel_agent_with_skills.runtime.retrieve("config")
+        assert config is not None
+        assert config["default_threshold"] == 1.5
+        assert "csv" in config["supported_formats"]
+
+
+class TestIPyKernelMultiTurnWorkflow:
+    """Test multi-turn conversations with skills using IPyKernelRuntime."""
+
+    @pytest.mark.asyncio
+    async def test_analysis_workflow(self, kernel_agent_with_skills):
+        # Turn 1: Activate skill
+        await kernel_agent_with_skills.run("Activate the 'data-analysis' skill.")
+
+        # Turn 2: Use injected function
+        await kernel_agent_with_skills.run(
+            "Use calculate_stats on [10, 20, 30, 40, 50] and store the result in 'stats'."
+        )
+
+        stats = await kernel_agent_with_skills.runtime.retrieve("stats")
+        assert stats is not None
+        assert stats["mean"] == 30.0
