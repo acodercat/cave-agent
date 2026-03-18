@@ -1,5 +1,5 @@
 from cave_agent import CaveAgent
-from cave_agent.runtime import PythonRuntime, Function
+from cave_agent.runtime import IPythonRuntime, Function
 import pytest
 
 @pytest.fixture
@@ -17,7 +17,7 @@ def basic_agent(model):
     multiply_func = Function(multiply)
     
     # Create runtime with functions
-    runtime = PythonRuntime(
+    runtime = IPythonRuntime(
         functions=[add_func, multiply_func]
     )
     

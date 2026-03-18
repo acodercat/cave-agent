@@ -11,7 +11,7 @@
   <a href="https://arxiv.org/abs/2601.01569"><img src="https://img.shields.io/badge/arXiv-Paper-red?style=flat-square&logo=arxiv" alt="arXiv Paper"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat-square" alt="Python 3.11+"></a>
-  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.6.5-blue?style=flat-square" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.7.0-blue?style=flat-square" alt="PyPI version"></a>
 </p>
 
 <p align="center">
@@ -34,6 +34,7 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 
 - [Installation](#installation)
 - [Hello World](#hello-world)
+- [Runtimes](#runtimes)
 - [Examples](#examples)
   - [Data Visualization](#data-visualization)
   - [Function Calling](#function-calling)
@@ -64,6 +65,9 @@ pip install 'cave-agent[openai]'
 
 # 100+ LLM providers via LiteLLM
 pip install 'cave-agent[litellm]'
+
+# Process-isolated kernel runtime (IPyKernelRuntime)
+pip install 'cave-agent[ipykernel]'
 ```
 
 ## Hello World
@@ -71,7 +75,7 @@ pip install 'cave-agent[litellm]'
 ```python
 import asyncio
 from cave_agent import CaveAgent
-from cave_agent.runtime import PythonRuntime, Variable, Function
+from cave_agent.runtime import IPythonRuntime, Variable, Function
 from cave_agent.models import LiteLLMModel
 
 model = LiteLLMModel(model_id="model-id", api_key="your-api-key", custom_llm_provider="openai")
@@ -81,7 +85,7 @@ async def main():
         """Reverse a string"""
         return s[::-1]
 
-    runtime = PythonRuntime(
+    runtime = IPythonRuntime(
         variables=[
             Variable("secret", "!dlrow ,olleH", "A reversed message"),
             Variable("greeting", "", "Store the reversed message"),
@@ -90,11 +94,65 @@ async def main():
     )
     agent = CaveAgent(model, runtime=runtime)
     response = await agent.run("Reverse the secret")
-    print(runtime.retrieve("secret"))  # Hello, world!
+    print(await runtime.retrieve("secret"))  # Hello, world!
     print(response.content)              # Agent's text response
 
 asyncio.run(main())
 ```
+
+## Runtimes
+
+CaveAgent provides two runtime backends. Both share the same API for injecting functions, variables, and types — choose based on your trust and isolation requirements.
+
+### IPythonRuntime (default)
+
+Code runs **in the same process** via an embedded IPython shell. Injected objects (DataFrames, DB connections, custom classes) are accessed directly — no serialization overhead.
+
+```python
+from cave_agent.runtime import IPythonRuntime, Function, Variable
+
+runtime = IPythonRuntime(
+    functions=[Function(my_func)],
+    variables=[Variable("data", my_dataframe, "Input data")],
+)
+agent = CaveAgent(model, runtime=runtime)
+```
+
+Best for: trusted environments, internal tools, when you need zero-overhead access to complex Python objects.
+
+### IPyKernelRuntime (process-isolated)
+
+Code runs in a **separate IPython kernel process**. If the code crashes (segfault, OOM, infinite loop), the host process stays alive — just reset the kernel and continue.
+
+```bash
+pip install 'cave-agent[ipykernel]'
+```
+
+```python
+from cave_agent.runtime import IPyKernelRuntime, Function, Variable
+
+async with IPyKernelRuntime(
+    functions=[Function(my_func)],
+    variables=[Variable("data", [1, 2, 3], "Input data")],
+) as runtime:
+    agent = CaveAgent(model, runtime=runtime)
+    response = await agent.run("Analyze the data")
+```
+
+Injected objects are serialized via [dill](https://github.com/uqfoundation/dill), which supports local functions, closures, lambdas, and most Python objects.
+
+Best for: untrusted code execution, multi-tenant environments, sandboxed agent workflows.
+
+### Comparison
+
+| | IPythonRuntime | IPyKernelRuntime |
+|---|---|---|
+| Isolation | Same process | Separate process |
+| Crash impact | Host process dies | Kernel restarts, host survives |
+| Object injection | Direct reference, zero-copy | Serialized via dill |
+| Startup | Instant | ~1s (kernel launch) |
+| Local functions / closures | Always works | Works (via dill) |
+| Requires | *(included)* | `pip install 'cave-agent[ipykernel]'` |
 
 ## Examples
 
@@ -102,13 +160,13 @@ asyncio.run(main())
 
 ```python
 from cave_agent import CaveAgent
-from cave_agent.runtime import PythonRuntime, Variable
+from cave_agent.runtime import IPythonRuntime, Variable
 from cave_agent.models import LiteLLMModel
 
 model = LiteLLMModel(model_id="model-id", api_key="your-api-key", custom_llm_provider="openai")
 
 # 1. Inject — real DB connection & chart config manager
-runtime = PythonRuntime(
+runtime = IPythonRuntime(
     variables=[
         Variable("engine", database_engine),             # SQLAlchemy Engine
         Variable("echarts_config_manager", EChartsConfigManager()),  # Chart collector
@@ -128,7 +186,7 @@ await agent.run("Show me the air quality trend for the past week")
 #   })
 
 # 3. Retrieve — get real chart configs for rendering
-mgr = runtime.retrieve("echarts_config_manager")  # Real Python object
+mgr = await runtime.retrieve("echarts_config_manager")  # Real Python object
 configs = mgr.get_configs()
 
 for config in configs:
@@ -139,14 +197,14 @@ for config in configs:
 
 ```python
 # Inject functions and variables into runtime
-runtime = PythonRuntime(
+runtime = IPythonRuntime(
     variables=[Variable("tasks", [], "User's task list")],
     functions=[Function(add_task), Function(complete_task)],
 )
 agent = CaveAgent(model, runtime=runtime)
 
 await agent.run("Add 'buy groceries' to my tasks")
-print(runtime.retrieve("tasks"))  # [{'name': 'buy groceries', 'done': False}]
+print(await runtime.retrieve("tasks"))  # [{'name': 'buy groceries', 'done': False}]
 ```
 
 See [examples/basic_usage.py](examples/basic_usage.py) for a complete example.
@@ -155,7 +213,7 @@ See [examples/basic_usage.py](examples/basic_usage.py) for a complete example.
 
 ```python
 # Inject objects with methods - LLM can call them directly
-runtime = PythonRuntime(
+runtime = IPythonRuntime(
     types=[Type(Light), Type(Thermostat)],
     variables=[
         Variable("light", Light("Living Room"), "Smart light"),
@@ -165,7 +223,7 @@ runtime = PythonRuntime(
 agent = CaveAgent(model, runtime=runtime)
 
 await agent.run("Dim the light to 20% and set thermostat to 22°C")
-light = runtime.retrieve("light")  # Object with updated state
+light = await runtime.retrieve("light")  # Object with updated state
 ```
 
 See [examples/object_methods.py](examples/object_methods.py) for a complete example.
@@ -174,16 +232,16 @@ See [examples/object_methods.py](examples/object_methods.py) for a complete exam
 
 ```python
 # Sub-agents with their own runtimes
-cleaner_agent = CaveAgent(model, runtime=PythonRuntime(variables=[
+cleaner_agent = CaveAgent(model, runtime=IPythonRuntime(variables=[
     Variable("data", [], "Input"), Variable("cleaned_data", [], "Output"),
 ]))
 
-analyzer_agent = CaveAgent(model, runtime=PythonRuntime(variables=[
+analyzer_agent = CaveAgent(model, runtime=IPythonRuntime(variables=[
     Variable("data", [], "Input"), Variable("insights", {}, "Output"),
 ]))
 
 # Orchestrator controls sub-agents as first-class objects
-orchestrator = CaveAgent(model, runtime=PythonRuntime(variables=[
+orchestrator = CaveAgent(model, runtime=IPythonRuntime(variables=[
     Variable("raw_data", raw_data, "Raw dataset"),
     Variable("cleaner", cleaner_agent, "Cleaner agent"),
     Variable("analyzer", analyzer_agent, "Analyzer agent"),
@@ -191,7 +249,7 @@ orchestrator = CaveAgent(model, runtime=PythonRuntime(variables=[
 
 # Inject → trigger → retrieve
 await orchestrator.run("Clean raw_data using cleaner, then analyze using analyzer")
-insights = analyzer.runtime.retrieve("insights")
+insights = analyzer.await runtime.retrieve("insights")
 ```
 
 See [examples/multi_agent.py](examples/multi_agent.py) for a complete example.
@@ -218,7 +276,7 @@ rules = [
     AttributeRule({"__globals__", "__builtins__"}),
     RegexRule([r"rm\s+-rf", r"sudo\s+"]),
 ]
-runtime = PythonRuntime(security_checker=SecurityChecker(rules))
+runtime = IPythonRuntime(security_checker=SecurityChecker(rules))
 ```
 
 ### More Examples
@@ -371,7 +429,7 @@ We thank these community to post our work.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | model | Model | required | LLM model instance (OpenAIServerModel or LiteLLMModel) |
-| runtime | PythonRuntime | None | Python runtime with variables, functions, and types |
+| runtime | Runtime | None | `IPythonRuntime` (default) or `IPyKernelRuntime` (process-isolated) |
 | skills | List[Skill] | None | List of skill objects to load |
 | max_steps | int | 5 | Maximum execution steps per run |
 | max_history | int | 10 | Maximum conversation history length |

@@ -2,7 +2,7 @@ import asyncio
 import os
 from cave_agent import CaveAgent
 from cave_agent.models import LiteLLMModel
-from cave_agent.runtime import PythonRuntime, Variable
+from cave_agent.runtime import IPythonRuntime, Variable
 
 
 # Initialize LLM model
@@ -41,7 +41,7 @@ async def main():
     # Cleaner Agent: Removes records with null values
     cleaner = CaveAgent(
         model,
-        runtime=PythonRuntime(
+        runtime=IPythonRuntime(
             variables=[
                 Variable("data", [], "Input: list of dicts with keys 'name', 'age', 'salary'"),
                 Variable("cleaned_data", [], "Output: list of dicts with no None values in any field"),
@@ -52,7 +52,7 @@ async def main():
     # Analyzer Agent: Computes statistics
     analyzer = CaveAgent(
         model,
-        runtime=PythonRuntime(
+        runtime=IPythonRuntime(
             variables=[
                 Variable("data", [], "Input: list of dicts with keys 'name', 'age', 'salary'"),
                 Variable("insights", {}, "Output: dict with computed statistics like total_records, avg_age, avg_salary"),
@@ -67,7 +67,7 @@ async def main():
 
     orchestrator = CaveAgent(
         model,
-        runtime=PythonRuntime(
+        runtime=IPythonRuntime(
             variables=[
                 # Input data
                 Variable("raw_data", raw_data, "Raw dataset with potential null values"),

@@ -1,10 +1,13 @@
-from .runtime import PythonRuntime
-from .executor import PythonExecutor, ExecutionResult, ErrorFeedbackMode
+from .runtime import Runtime
+from .ipython_runtime import IPythonRuntime
+from .ipykernel_runtime import IPyKernelRuntime
+from .executor import ExecutionResult, ErrorFeedbackMode
 from .primitives import Variable, Function, Type, TypeSchemaExtractor
 
 __all__ = [
-    "PythonRuntime",
-    "PythonExecutor",
+    "Runtime",
+    "IPythonRuntime",
+    "IPyKernelRuntime",
     "ExecutionResult",
     "ErrorFeedbackMode",
     "Variable",

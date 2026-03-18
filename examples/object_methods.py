@@ -1,6 +1,6 @@
 from cave_agent import CaveAgent
 from cave_agent.models import OpenAIServerModel
-from cave_agent.runtime import PythonRuntime, Variable
+from cave_agent.runtime import IPythonRuntime, Variable
 from dataclasses import dataclass
 import os
 import asyncio
@@ -64,7 +64,7 @@ async def main():
     )
 
     # Create runtime
-    runtime = PythonRuntime(
+    runtime = IPythonRuntime(
         variables=[processor_var, numbers_var, processed_data_var, filtered_data_var]
     )
 

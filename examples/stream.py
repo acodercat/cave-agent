@@ -1,6 +1,6 @@
 from cave_agent import CaveAgent, LogLevel, Logger
 from cave_agent.models import OpenAIServerModel
-from cave_agent.runtime import PythonRuntime, Variable, Type
+from cave_agent.runtime import IPythonRuntime, Variable, Type
 import os
 import asyncio
 from rich.syntax import Syntax
@@ -44,7 +44,7 @@ async def main():
     )
     
     # Create runtime
-    runtime = PythonRuntime(
+    runtime = IPythonRuntime(
         variables=[processor_var, numbers_var, result_var],
         types=[Type(DataProcessor)]
     )

@@ -3,7 +3,8 @@ import pytest
 from cave_agent.security import (
     SecurityChecker, SecurityError, ImportRule, FunctionRule, AttributeRule, RegexRule
 )
-from cave_agent.runtime import PythonRuntime, PythonExecutor
+from cave_agent.runtime import IPythonRuntime
+from cave_agent.runtime.executor import IPythonExecutor
 
 
 class TestSecurityChecker:
@@ -188,7 +189,7 @@ class TestPythonRuntimeSecurity:
             FunctionRule({"eval"})
         ]
         checker = SecurityChecker(rules)
-        runtime = PythonRuntime(security_checker=checker)
+        runtime = IPythonRuntime(security_checker=checker)
         
         # Test safe code execution
         safe_code = "x = 5 + 3"
@@ -205,7 +206,7 @@ class TestPythonRuntimeSecurity:
     @pytest.mark.asyncio
     async def test_runtime_with_security_disabled(self):
         """Test PythonRuntime with security checking disabled."""
-        runtime = PythonRuntime(security_checker=None)
+        runtime = IPythonRuntime(security_checker=None)
         
         # Any code should execute when security is disabled
         code = "result = 'security_disabled'"
@@ -218,7 +219,7 @@ class TestPythonRuntimeSecurity:
         # RegexRule only works on expressions, so test with a print statement
         regex_rule = RegexRule(r"print\s*\(", "Disallow print statements")
         checker = SecurityChecker([regex_rule])
-        runtime = PythonRuntime(security_checker=checker)
+        runtime = IPythonRuntime(security_checker=checker)
         
         # Test that regex rule works
         print_code = "print('hello world')"
@@ -234,7 +235,7 @@ class TestPythonExecutorSecurity:
         """Test PythonExecutor with SecurityChecker."""
         rules = [ImportRule({"os"}), FunctionRule({"eval"})]
         checker = SecurityChecker(rules)
-        executor = PythonExecutor(security_checker=checker)
+        executor = IPythonExecutor(security_checker=checker)
         
         # Test safe code
         safe_code = "x = 42"
@@ -251,7 +252,7 @@ class TestPythonExecutorSecurity:
     @pytest.mark.asyncio
     async def test_executor_without_security(self):
         """Test PythonExecutor without security checking."""
-        executor = PythonExecutor(security_checker=None)
+        executor = IPythonExecutor(security_checker=None)
         
         # Any code should execute (subject to Python's own restrictions)
         code = "x = 'no_security'"

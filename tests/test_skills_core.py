@@ -4,7 +4,7 @@ from pathlib import Path
 
 from cave_agent.skills import Skill, SkillRegistry, SkillDiscovery
 from cave_agent import CaveAgent
-from cave_agent.runtime import PythonRuntime, Function, Variable, Type
+from cave_agent.runtime import IPythonRuntime, IPyKernelRuntime, Function, Variable, Type
 from cave_agent.models import Model
 
 
@@ -317,9 +317,7 @@ class TestSkillDiscoveryFromDirectory:
 
 class TestSkillRegistry:
     def test_add_and_get_skill(self):
-        """Test adding and retrieving a skill."""
-        runtime = PythonRuntime()
-        registry = SkillRegistry(runtime)
+        registry = SkillRegistry()
         skill = Skill(name="test", description="Test skill")
         registry.add_skill(skill)
 
@@ -327,21 +325,16 @@ class TestSkillRegistry:
         assert registry.get_skill("nonexistent") is None
 
     def test_add_skills(self):
-        """Test adding multiple skills."""
-        runtime = PythonRuntime()
-        registry = SkillRegistry(runtime)
+        registry = SkillRegistry()
         skills = [
             Skill(name="skill1", description="First"),
             Skill(name="skill2", description="Second"),
         ]
         registry.add_skills(skills)
-
         assert len(registry.list_skills()) == 2
 
     def test_describe_skills(self):
-        """Test skill descriptions for system prompt."""
-        runtime = PythonRuntime()
-        registry = SkillRegistry(runtime)
+        registry = SkillRegistry()
         registry.add_skill(Skill(name="my-skill", description="My description"))
 
         description = registry.describe_skills()
@@ -349,106 +342,65 @@ class TestSkillRegistry:
         assert "My description" in description
 
     def test_describe_skills_empty(self):
-        """Test empty registry returns 'No skills available'."""
-        runtime = PythonRuntime()
-        registry = SkillRegistry(runtime)
+        registry = SkillRegistry()
         assert registry.describe_skills() == "No skills available"
 
 
-class TestSkillRegistryActivation:
-    def test_activate_skill(self):
-        """Test activate_skill returns body content."""
-        runtime = PythonRuntime()
-        registry = SkillRegistry(runtime)
-        skill = Skill(
-            name="test",
-            description="Test",
-            body_content="# Instructions\nDo this."
-        )
-        registry.add_skill(skill)
+class TestBuildSkillStore:
+    """Test SkillRegistry.build_skill_store()."""
 
-        result = registry.activate_skill("test")
-        assert "Instructions" in result
+    def test_empty_registry(self):
+        registry = SkillRegistry()
+        assert registry.build_skill_store() == {}
 
-    def test_activate_skill_not_found(self):
-        """Test activate_skill raises KeyError for unknown skill."""
-        runtime = PythonRuntime()
-        registry = SkillRegistry(runtime)
+    def test_store_contains_body_content(self):
+        registry = SkillRegistry()
+        registry.add_skill(Skill(name="test", description="Test", body_content="Instructions"))
+        store = registry.build_skill_store()
 
-        with pytest.raises(KeyError) as exc_info:
-            registry.activate_skill("nonexistent")
-        assert "nonexistent" in str(exc_info.value)
+        assert "test" in store
+        assert store["test"]["body_content"] == "Instructions"
 
-    def test_activate_skill_injects_functions(self):
-        """Test activate_skill injects functions into runtime."""
+    def test_store_contains_function_exports(self):
         def helper(x):
             return x * 2
 
-        runtime = PythonRuntime()
-        registry = SkillRegistry(agent_runtime=runtime)
-        skill = Skill(
-            name="test",
-            description="Test",
-            functions=[Function(helper)]
-        )
-        registry.add_skill(skill)
-        registry.activate_skill("test")
+        registry = SkillRegistry()
+        registry.add_skill(Skill(name="test", description="Test", functions=[Function(helper)]))
+        store = registry.build_skill_store()
 
-        assert "helper" in runtime.describe_functions()
+        assert "helper" in store["test"]["exports"]
+        assert store["test"]["exports"]["helper"](5) == 10
 
-    def test_activate_skill_injects_variables(self):
-        """Test activate_skill injects variables into runtime."""
-        runtime = PythonRuntime()
-        registry = SkillRegistry(agent_runtime=runtime)
-        skill = Skill(
-            name="test",
-            description="Test",
-            variables=[Variable("CONFIG", value={"key": "value"})]
-        )
-        registry.add_skill(skill)
-        registry.activate_skill("test")
+    def test_store_contains_variable_exports(self):
+        registry = SkillRegistry()
+        registry.add_skill(Skill(
+            name="test", description="Test",
+            variables=[Variable("CONFIG", value={"key": "val"})],
+        ))
+        store = registry.build_skill_store()
 
-        assert "CONFIG" in runtime.describe_variables()
+        assert store["test"]["exports"]["CONFIG"] == {"key": "val"}
 
-    def test_activate_skill_injects_types(self):
-        """Test activate_skill injects types into runtime."""
-        from dataclasses import dataclass
+    def test_store_contains_type_exports(self):
+        class MyType:
+            pass
 
-        @dataclass
-        class Point:
-            x: float
-            y: float
+        registry = SkillRegistry()
+        registry.add_skill(Skill(name="test", description="Test", types=[Type(MyType)]))
+        store = registry.build_skill_store()
 
-        runtime = PythonRuntime()
-        registry = SkillRegistry(agent_runtime=runtime)
-        skill = Skill(
-            name="test",
-            description="Test",
-            types=[Type(Point)]
-        )
-        registry.add_skill(skill)
-        registry.activate_skill("test")
+        assert store["test"]["exports"]["MyType"] is MyType
 
-        assert "Point" in runtime.describe_types()
+    def test_store_multiple_skills(self):
+        registry = SkillRegistry()
+        registry.add_skill(Skill(name="a", description="A", body_content="A instructions"))
+        registry.add_skill(Skill(name="b", description="B", body_content="B instructions"))
+        store = registry.build_skill_store()
 
-    @pytest.mark.asyncio
-    async def test_injected_function_usable(self):
-        """Test injected function can be called in runtime."""
-        def double(x):
-            return x * 2
-
-        runtime = PythonRuntime()
-        registry = SkillRegistry(agent_runtime=runtime)
-        skill = Skill(
-            name="test",
-            description="Test",
-            functions=[Function(double)]
-        )
-        registry.add_skill(skill)
-        registry.activate_skill("test")
-
-        result = await runtime.execute("print(double(21))")
-        assert "42" in result.stdout
+        assert len(store) == 2
+        assert store["a"]["body_content"] == "A instructions"
+        assert store["b"]["body_content"] == "B instructions"
 
 
 # =============================================================================
@@ -457,31 +409,25 @@ class TestSkillRegistryActivation:
 
 class TestAgentSkillsInit:
     def test_agent_with_skills_list(self, mock_model):
-        """Test agent initialization with skills list."""
         skill = Skill(name="test-skill", description="Test")
         agent = CaveAgent(model=mock_model, skills=[skill])
-
         assert agent._skill_registry.get_skill("test-skill") is not None
 
     def test_agent_with_skills_from_discovery(self, temp_dir, mock_model):
-        """Test agent with skills loaded via SkillDiscovery."""
         (temp_dir / "SKILL.md").write_text(
             "---\nname: test\ndescription: Test skill\n---\nContent"
         )
-
         skills = SkillDiscovery.from_directory(temp_dir)
         agent = CaveAgent(model=mock_model, skills=skills)
         assert agent._skill_registry.get_skill("test") is not None
 
     def test_agent_no_skills(self, mock_model):
-        """Test agent without skills."""
         agent = CaveAgent(model=mock_model)
         assert agent._skill_registry.list_skills() == []
 
 
 class TestAgentSkillsSystemPrompt:
     def test_skills_in_system_prompt(self, mock_model):
-        """Test skills appear in system prompt."""
         skill = Skill(name="my-skill", description="My description")
         agent = CaveAgent(model=mock_model, skills=[skill])
         prompt = agent.build_system_prompt()
@@ -490,7 +436,6 @@ class TestAgentSkillsSystemPrompt:
         assert "My description" in prompt
 
     def test_no_skills_in_system_prompt(self, mock_model):
-        """Test system prompt with no skills."""
         agent = CaveAgent(model=mock_model)
         prompt = agent.build_system_prompt()
         assert "No skills available" in prompt
@@ -498,35 +443,143 @@ class TestAgentSkillsSystemPrompt:
 
 class TestAgentSkillsRuntime:
     def test_activate_skill_function_injected(self, mock_model):
-        """Test activate_skill function is injected into runtime."""
+        """activate_skill function is injected into runtime."""
         skill = Skill(name="test", description="Test")
         agent = CaveAgent(model=mock_model, skills=[skill])
-
-        functions = agent.runtime.describe_functions()
-        assert "activate_skill" in functions
+        assert "activate_skill" in agent.runtime.describe_functions()
 
     def test_activate_skill_not_injected_without_skills(self, mock_model):
-        """Test activate_skill is not injected when no skills."""
         agent = CaveAgent(model=mock_model)
-
-        functions = agent.runtime.describe_functions()
-        assert "activate_skill" not in functions
+        assert "activate_skill" not in agent.runtime.describe_functions()
 
     @pytest.mark.asyncio
     async def test_activate_skill_execution(self, mock_model):
-        """Test executing activate_skill in runtime."""
+        """activate_skill works in IPythonRuntime."""
         skill = Skill(
             name="my-skill",
             description="Test",
-            body_content="Skill instructions here"
+            body_content="Skill instructions here",
         )
         agent = CaveAgent(model=mock_model, skills=[skill])
 
         result = await agent.runtime.execute('output = activate_skill("my-skill")')
         assert result.success
 
-        result = await agent.runtime.execute('print(output)')
+        result = await agent.runtime.execute("print(output)")
         assert "Skill instructions here" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_activate_skill_injects_exports(self, mock_model):
+        """activate_skill injects functions/variables into namespace."""
+        def helper(x):
+            return x * 2
+
+        skill = Skill(
+            name="my-skill",
+            description="Test",
+            body_content="Instructions",
+            functions=[Function(helper)],
+            variables=[Variable("data", value=[1, 2, 3])],
+        )
+        agent = CaveAgent(model=mock_model, skills=[skill])
+
+        await agent.runtime.execute('activate_skill("my-skill")')
+
+        result = await agent.runtime.execute("print(helper(5))")
+        assert "10" in result.stdout
+
+        result = await agent.runtime.execute("print(sum(data))")
+        assert "6" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_activate_skill_not_found(self, mock_model):
+        """activate_skill raises KeyError for unknown skill."""
+        skill = Skill(name="test", description="Test")
+        agent = CaveAgent(model=mock_model, skills=[skill])
+
+        result = await agent.runtime.execute('activate_skill("nonexistent")')
+        assert not result.success
+        assert "nonexistent" in result.stdout
+
+
+# =============================================================================
+# IPyKernelRuntime Skills Tests
+# =============================================================================
+
+class TestAgentSkillsIPyKernel:
+    """Test CaveAgent skills with IPyKernelRuntime."""
+
+    def test_activate_skill_function_injected(self, mock_model):
+        skill = Skill(name="test", description="Test")
+        runtime = IPyKernelRuntime()
+        agent = CaveAgent(model=mock_model, runtime=runtime, skills=[skill])
+        assert "activate_skill" in agent.runtime.describe_functions()
+
+    @pytest.mark.asyncio
+    async def test_activate_skill_execution_in_kernel(self, mock_model):
+        """activate_skill works in IPyKernelRuntime."""
+        skill = Skill(
+            name="my-skill",
+            description="Test",
+            body_content="Skill instructions here",
+        )
+        runtime = IPyKernelRuntime()
+        agent = CaveAgent(model=mock_model, runtime=runtime, skills=[skill])
+
+        await runtime.start()
+        try:
+            result = await agent.runtime.execute('output = activate_skill("my-skill")')
+            assert result.success
+
+            result = await agent.runtime.execute("print(output)")
+            assert "Skill instructions here" in result.stdout
+        finally:
+            await runtime.stop()
+
+    @pytest.mark.asyncio
+    async def test_activate_skill_injects_exports_in_kernel(self, mock_model):
+        """activate_skill injects functions/variables into kernel namespace."""
+        def helper(x):
+            return x * 2
+
+        skill = Skill(
+            name="my-skill",
+            description="Test",
+            body_content="Instructions",
+            functions=[Function(helper)],
+            variables=[Variable("data", value=[1, 2, 3])],
+        )
+        runtime = IPyKernelRuntime()
+        agent = CaveAgent(model=mock_model, runtime=runtime, skills=[skill])
+
+        await runtime.start()
+        try:
+            await agent.runtime.execute('activate_skill("my-skill")')
+
+            result = await agent.runtime.execute("print(helper(5))")
+            assert result.success
+            assert "10" in result.stdout
+
+            result = await agent.runtime.execute("print(sum(data))")
+            assert result.success
+            assert "6" in result.stdout
+        finally:
+            await runtime.stop()
+
+    @pytest.mark.asyncio
+    async def test_activate_nonexistent_skill_in_kernel(self, mock_model):
+        """activate_skill raises KeyError for unknown skill in kernel."""
+        skill = Skill(name="real-skill", description="Test")
+        runtime = IPyKernelRuntime()
+        agent = CaveAgent(model=mock_model, runtime=runtime, skills=[skill])
+
+        await runtime.start()
+        try:
+            result = await agent.runtime.execute('activate_skill("nonexistent")')
+            assert not result.success
+            assert "nonexistent" in result.stdout
+        finally:
+            await runtime.stop()
 
 
 # =============================================================================
@@ -535,7 +588,6 @@ class TestAgentSkillsRuntime:
 
 class TestFunctionIsAsync:
     def test_sync_function_is_async_false(self):
-        """Test is_async=False for sync functions."""
         def sync_func():
             pass
 
@@ -543,7 +595,6 @@ class TestFunctionIsAsync:
         assert func.is_async is False
 
     def test_async_function_is_async_true(self):
-        """Test is_async=True for async functions."""
         async def async_func():
             pass
 

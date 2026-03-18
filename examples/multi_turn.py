@@ -1,6 +1,6 @@
 from cave_agent import CaveAgent
 from cave_agent.models import OpenAIServerModel
-from cave_agent.runtime import PythonRuntime, Variable, Type
+from cave_agent.runtime import IPythonRuntime, Variable, Type
 import os
 import asyncio
 
@@ -60,7 +60,7 @@ async def main():
     )
 
     # Create runtime with variables
-    runtime = PythonRuntime(
+    runtime = IPythonRuntime(
         variables=[analyzer_var, numbers_var, stats_var],
         types=[Type(DataAnalyzer)]
     )
@@ -88,7 +88,7 @@ async def main():
     print("\n\n=== Streaming Example ===")
     
     # Create a new agent for streaming demo
-    runtime_streaming = PythonRuntime(
+    runtime_streaming = IPythonRuntime(
         variables=[analyzer_var, numbers_var, stats_var]
     )
     agent_streaming = CaveAgent(model, runtime=runtime_streaming)
