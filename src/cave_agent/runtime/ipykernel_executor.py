@@ -104,15 +104,28 @@ class IPyKernelExecutor:
         self._pending_injections[name] = value
 
     async def get_from_namespace(self, name: str) -> Any:
-        """Retrieve a variable from the kernel namespace via dill."""
+        """Retrieve a variable from the kernel namespace via dill.
+
+        Uses IPython's ``display()`` with a custom mime type to transport
+        serialized data through the Jupyter display_data channel, rather
+        than mixing serialized output into stdout.
+        """
+        await self._flush_injections()
         code = (
             "import dill as _d, base64 as _b\n"
-            f"print(_b.b64encode(_d.dumps({name})).decode(), end='')"
+            f"display({{'application/x-dill': _b.b64encode(_d.dumps({name})).decode()}}, raw=True)"
         )
-        result = await self.execute(code)
-        if not result.success:
-            raise KeyError(f"Variable '{name}': {result.stdout or 'not found'}")
-        return dill.loads(base64.b64decode(result.stdout.strip()))
+        msg_id = self._kc.execute(code)
+        async for msg in self._iopub_for(msg_id):
+            if msg["header"]["msg_type"] == "display_data":
+                encoded = msg["content"]["data"].get("application/x-dill")
+                if encoded:
+                    return dill.loads(base64.b64decode(encoded))
+            elif msg["header"]["msg_type"] == "error":
+                raise KeyError(
+                    f"Variable '{name}': {msg['content']['ename']}: {msg['content']['evalue']}"
+                )
+        raise KeyError(f"Variable '{name}' not found")
 
     # ------------------------------------------------------------------
     # Execution

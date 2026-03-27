@@ -16,24 +16,20 @@ class LogLevel(IntEnum):
 class Logger:
     """Structured logger with rich formatting for CaveAgent."""
 
+    _STYLES = {
+        LogLevel.DEBUG: Style(color="yellow", bold=False),
+        LogLevel.INFO: Style(color="bright_blue", bold=False),
+        LogLevel.ERROR: Style(color="bright_red", bold=True),
+    }
+
     def __init__(self, level: LogLevel = LogLevel.INFO):
         self.console = Console()
         self.level = level
-        self._level_styles = {
-            LogLevel.DEBUG: Style(color="yellow", bold=False),
-            LogLevel.INFO: Style(color="bright_blue", bold=False),
-            LogLevel.ERROR: Style(color="bright_red", bold=True),
-        }
-        self._level_prefix = {
-            LogLevel.DEBUG: "DEBUG",
-            LogLevel.INFO: "INFO",
-            LogLevel.ERROR: "ERROR",
-        }
 
-    def _log(self, title: str, content: Any, style: str, level: LogLevel = LogLevel.INFO):
+    def _log(self, title: str, content: Any, style: str, level: LogLevel):
         if level <= self.level:
             message = Text()
-            message.append(f"[{self._level_prefix[level]}] ", self._level_styles[level])
+            message.append(f"[{level.name}] ", self._STYLES[level])
             parsed_style = Style.parse(style)
             message.append(f"{title}: \n", parsed_style)
             message.append(str(content), parsed_style)
