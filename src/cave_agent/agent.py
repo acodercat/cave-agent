@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum, IntEnum
+from enum import Enum
 from typing import AsyncGenerator
 
 from .logger import LogLevel, Logger
@@ -144,45 +144,30 @@ class AgentResponse:
 # ---------------------------------------------------------------------------
 
 
-class _ContextState(IntEnum):
-    INITIALIZED = 0
-    RUNNING = 1
-    COMPLETED = 2
-    MAX_STEPS_REACHED = 3
-
-
 class _ExecutionContext:
-    """Manages execution state with max steps limit."""
+    """Tracks execution state across steps."""
 
     def __init__(self, max_steps: int = 10):
         self.max_steps = max_steps
         self.code_snippets: list[str] = []
         self.total_steps = 0
-        self.state = _ContextState.INITIALIZED
         self.token_usage = TokenUsage()
+        self._completed = False
 
     def start(self) -> None:
         self.total_steps = 0
-        self.state = _ContextState.RUNNING
         self.token_usage = TokenUsage()
-
-    def next_step(self) -> bool:
-        """Record a step. Returns False if max steps reached."""
-        if self.total_steps >= self.max_steps:
-            self.state = _ContextState.MAX_STEPS_REACHED
-            return False
-        self.total_steps += 1
-        return True
+        self._completed = False
 
     def complete(self) -> None:
-        self.state = _ContextState.COMPLETED
+        self._completed = True
 
     def add_token_usage(self, usage: TokenUsage) -> None:
         self.token_usage = self.token_usage + usage
 
     @property
-    def is_running(self) -> bool:
-        return self.state == _ContextState.RUNNING
+    def is_completed(self) -> bool:
+        return self._completed
 
 
 class _ExecutionOutcome:
@@ -269,20 +254,14 @@ class CaveAgent:
         context.start()
         self._initialize_conversation(query)
 
-        while context.is_running:
-            if not context.next_step():
-                self.logger.info(
-                    "Max steps reached",
-                    f"Completed {context.total_steps}/{context.max_steps} steps",
-                )
-                return self._build_response(context, "", ExecutionStatus.MAX_STEPS_REACHED)
-
+        response = ""
+        for _ in range(self.max_steps):
             response = await self._execute_step(context)
-
-            if not context.is_running:
+            if context.is_completed:
                 return self._build_response(context, response, ExecutionStatus.SUCCESS)
 
-        raise RuntimeError("Unreachable: execution loop exited without returning")
+        self.logger.info("Max steps reached", f"Completed {self.max_steps}/{self.max_steps} steps")
+        return self._build_response(context, response, ExecutionStatus.MAX_STEPS_REACHED)
 
     async def stream_events(self, query: str) -> AsyncGenerator[Event, None]:
         """Stream events during agent execution."""
@@ -290,19 +269,14 @@ class CaveAgent:
         context.start()
         self._initialize_conversation(query)
 
-        while context.is_running:
-            if not context.next_step():
-                self.logger.info(
-                    "Max steps reached",
-                    f"Completed {context.total_steps}/{context.max_steps} steps",
-                )
-                yield Event(EventType.MAX_STEPS_REACHED, "Max steps reached")
-                return
-
+        for _ in range(self.max_steps):
             async for event in self._stream_step(context):
                 yield event
-                if not context.is_running:
-                    return
+            if context.is_completed:
+                return
+
+        self.logger.info("Max steps reached", f"Completed {self.max_steps}/{self.max_steps} steps")
+        yield Event(EventType.MAX_STEPS_REACHED, "Max steps reached")
 
     def build_system_prompt(self) -> str:
         """Build and format the system prompt with current runtime state."""
@@ -332,6 +306,7 @@ class CaveAgent:
 
     async def _execute_step(self, context: _ExecutionContext) -> str:
         """Execute a single step and return the model response."""
+        context.total_steps += 1
         self._log_step(context)
 
         model_response = await self.model.call(self._prepare_messages())
@@ -341,6 +316,7 @@ class CaveAgent:
 
     async def _stream_step(self, context: _ExecutionContext) -> AsyncGenerator[Event, None]:
         """Execute a single step with streaming output."""
+        context.total_steps += 1
         self._log_step(context)
 
         chunks: list[str] = []
