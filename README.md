@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://github.com/acodercat/cave-agent/raw/master/images/logo-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="https://github.com/acodercat/cave-agent/raw/master/images/logo-light.svg">
-    <img src="https://github.com/acodercat/cave-agent/raw/master/images/logo-light.svg" alt="CaveAgent" width="420">
+    <img src="https://github.com/acodercat/cave-agent/raw/master/images/logo-light.svg" alt="CaveAgent" width="50%">
   </picture>
 </p>
 
