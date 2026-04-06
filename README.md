@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="https://github.com/acodercat/cave-agent/raw/master/images/banner.png" alt="CaveAgent">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/acodercat/cave-agent/raw/master/images/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://github.com/acodercat/cave-agent/raw/master/images/logo-light.svg">
+    <img src="https://github.com/acodercat/cave-agent/raw/master/images/logo-light.svg" alt="CaveAgent">
+  </picture>
 </p>
 
 <h3 align="center">
