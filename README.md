@@ -31,7 +31,7 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 - **Retrieve** manipulated objects back as native Python types for downstream
 
 <p align="center">
-  <video src="https://github.com/acodercat/cave-agent/raw/master/assets/demo.mp4" controls width="600"></video>
+  <video src="assets/demo.mp4" controls width="600"></video>
 </p>
 
 ## Table of Contents
