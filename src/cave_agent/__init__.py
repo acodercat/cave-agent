@@ -1,5 +1,5 @@
 from .agent import CaveAgent, Message, MessageRole, EventType
-from .logger import LogLevel, Logger
+from .display import with_display, render_events, render_user_prompt
 from .models import Model, ModelResponse, TokenUsage, OpenAIServerModel, LiteLLMModel
 from .runtime import Runtime, IPythonRuntime, Function, Variable, Type
 from .security import SecurityChecker, SecurityError, SecurityViolation, SecurityRule, ImportRule, FunctionRule, AttributeRule, RegexRule
@@ -22,8 +22,6 @@ __all__ = [
     "LiteLLMModel",
     "Message",
     "MessageRole",
-    "LogLevel",
-    "Logger",
     "EventType",
     "Runtime",
     "IPythonRuntime",
@@ -42,4 +40,7 @@ __all__ = [
     "Skill",
     "SkillDiscovery",
     "SkillRegistry",
+    "with_display",
+    "render_events",
+    "render_user_prompt",
 ]

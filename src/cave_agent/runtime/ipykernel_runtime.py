@@ -61,6 +61,10 @@ class IPyKernelRuntime(Runtime):
     # Reset
     # ------------------------------------------------------------------
 
+    async def interrupt(self) -> None:
+        """Send SIGINT to the kernel to interrupt running execution."""
+        await self._executor._km.interrupt_kernel()
+
     async def reset(self) -> None:  # type: ignore[override]
         """Restart the kernel and re-inject all registered objects."""
         await self._executor.reset()

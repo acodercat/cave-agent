@@ -27,7 +27,7 @@ def _make_injection_code(name: str, value: Any) -> str:
     Uses dill for serialization, which handles local functions, closures,
     lambdas, and most Python objects that standard pickle cannot.
     """
-    data = base64.b64encode(dill.dumps(value)).decode()
+    data = base64.b64encode(dill.dumps(value, recurse=True)).decode()
     return (
         "import dill as _dill, base64 as _b64\n"
         f"{name} = _dill.loads(_b64.b64decode({data!r}))"

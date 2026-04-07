@@ -81,9 +81,9 @@ async def main():
     
     print("\n")
     logger.info("Runtime State", str({
-        'processor': agent.runtime.retrieve('processor'),
-        'numbers': agent.runtime.retrieve('numbers'),
-        'result': agent.runtime.retrieve('result')
+        'processor': await agent.runtime.retrieve('processor'),
+        'numbers': await agent.runtime.retrieve('numbers'),
+        'result': await agent.runtime.retrieve('result')
     }), 'yellow')
 
 if __name__ == "__main__":

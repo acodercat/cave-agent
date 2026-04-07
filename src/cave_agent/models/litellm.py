@@ -1,6 +1,6 @@
-from typing import List, Dict, Optional, Any, AsyncIterator
+from typing import List, Dict, Optional, Any
 
-from .base import Model, ModelResponse, TokenUsage
+from .base import Model, ModelResponse, StreamResponse, TokenUsage
 
 
 class LiteLLMModel(Model):
@@ -52,16 +52,6 @@ class LiteLLMModel(Model):
 
         return params
 
-    def _extract_token_usage(self, response: Any) -> TokenUsage:
-        """Extract token usage from LiteLLM response."""
-        if hasattr(response, 'usage') and response.usage:
-            return TokenUsage(
-                prompt_tokens=getattr(response.usage, 'prompt_tokens', 0) or 0,
-                completion_tokens=getattr(response.usage, 'completion_tokens', 0) or 0,
-                total_tokens=getattr(response.usage, 'total_tokens', 0) or 0
-            )
-        return TokenUsage()
-
     async def call(self, messages: List[Dict[str, str]]) -> ModelResponse:
         """Generate response."""
         import litellm
@@ -76,13 +66,34 @@ class LiteLLMModel(Model):
             token_usage=self._extract_token_usage(response)
         )
 
-    async def stream(self, messages: List[Dict[str, str]]) -> AsyncIterator[str]:
-        """Stream response tokens"""
-        import litellm
-        response = await litellm.acompletion(**self._prepare_params(messages), stream=True)
+    def stream(self, messages: List[Dict[str, str]]) -> StreamResponse:
+        """Stream response tokens."""
+        return _LiteLLMStreamResponse(self, messages)
 
-        async for chunk in response:
+
+class _LiteLLMStreamResponse(StreamResponse):
+    """Async iterator over LiteLLM streaming chunks."""
+
+    def __init__(self, model: LiteLLMModel, messages: List[Dict[str, str]]):
+        super().__init__()
+        self._model = model
+        self._messages = messages
+        self._iterator = None
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> str:
+        if self._iterator is None:
+            import litellm
+            response = await litellm.acompletion(
+                **self._model._prepare_params(self._messages), stream=True,
+            )
+            self._iterator = response.__aiter__()
+
+        while True:
+            chunk = await self._iterator.__anext__()
             if hasattr(chunk, "choices") and len(chunk.choices) > 0:
                 delta = chunk.choices[0].delta
                 if delta.content:
-                    yield delta.content
+                    return delta.content

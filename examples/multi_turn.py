@@ -13,20 +13,20 @@ model = OpenAIServerModel(
 # Define data processing class
 class DataAnalyzer:
     """A data analyzer that provides statistical analysis for numerical data.
-    
+
     This analyzer calculates basic descriptive statistics including:
     - Minimum value
     - Maximum value
     - Average (mean)
     - Length of data
-    
+
     Example:
         >>> analyzer = DataAnalyzer()
         >>> stats = analyzer.analyze([1, 2, 3, 4, 5])
         >>> print(stats)
         {'min': 1, 'max': 5, 'avg': 3.0, 'len': 5}
     """
-    
+
     def analyze(self, data: list) -> dict:
         """Calculate basic statistical measures for a list of numbers."""
         return {
@@ -47,13 +47,13 @@ async def main():
         value=analyzer,
         description="Tool for analyzing numerical data\nusage: stats = analyzer.analyze(numbers)"
     )
-    
+
     numbers_var = Variable(
         name="numbers",
         value=numbers,
         description="Input data to analyze\nusage: print(numbers)"
     )
-    
+
     stats_var = Variable(
         name="stats",
         description="Store analysis results here\nusage: stats = analyzer.analyze(numbers)"
@@ -66,14 +66,14 @@ async def main():
     )
 
     # Create agent
-    agent = CaveAgent(model, runtime=runtime)
+    agent = CaveAgent(model, runtime=runtime, display=True)
 
     # Multi-turn conversation
     print("Starting analysis conversation...")
 
     # First turn - get basic stats
     await agent.run("Analyze the numbers and store the results in 'stats'")
-    stats = agent.runtime.retrieve('stats')
+    stats = await agent.runtime.retrieve('stats')
     print("\nBasic stats:", stats)
 
     # Second turn - ask about specific stat
@@ -84,19 +84,19 @@ async def main():
     response = await agent.run("Is the maximum value (9) significantly higher than the average?")
     print("\nInterpretation:", response.content)
 
-    # Alternative approach with streaming
-    print("\n\n=== Streaming Example ===")
-    
-    # Create a new agent for streaming demo
-    runtime_streaming = IPythonRuntime(
-        variables=[analyzer_var, numbers_var, stats_var]
-    )
-    agent_streaming = CaveAgent(model, runtime=runtime_streaming)
-    
-    async for event in agent_streaming.stream_events(
-        "Analyze the numbers, calculate the range (max - min), and tell me if the data is spread out"
-    ):
-        print(f"[{event.type.value}] {event.content}")
+    # # Alternative approach with streaming
+    # print("\n\n=== Streaming Example ===")
+
+    # # Create a new agent for streaming demo
+    # runtime_streaming = IPythonRuntime(
+    #     variables=[analyzer_var, numbers_var, stats_var]
+    # )
+    # agent_streaming = CaveAgent(model, runtime=runtime_streaming)
+
+    # async for event in agent_streaming.stream_events(
+    #     "Analyze the numbers, calculate the range (max - min), and tell me if the data is spread out"
+    # ):
+    #     print(f"[{event.type.value}] {event.content}")
 
 if __name__ == "__main__":
     asyncio.run(main())
