@@ -30,9 +30,8 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 - **Persist** state across turns without serialization; objects live in the runtime, not in the context window
 - **Retrieve** manipulated objects back as native Python types for downstream
 
-<p align="center">
-  <video src="assets/demo.mp4" controls width="600"></video>
-</p>
+
+https://github.com/user-attachments/assets/0e4a23b0-1afb-4408-8d87-ae1e13388aae
 
 ## Table of Contents
 
