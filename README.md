@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/acodercat/cave-agent/raw/master/images/logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="https://github.com/acodercat/cave-agent/raw/master/images/logo-light.svg">
-    <img src="https://github.com/acodercat/cave-agent/raw/master/images/logo-light.svg" alt="CaveAgent" width="50%">
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/acodercat/cave-agent/raw/master/assets/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://github.com/acodercat/cave-agent/raw/master/assets/logo-light.svg">
+    <img src="https://github.com/acodercat/cave-agent/raw/master/assets/logo-light.svg" alt="CaveAgent" width="50%">
   </picture>
 </p>
 
@@ -14,8 +14,8 @@
   <a href="https://caveagent.dev"><img src="https://img.shields.io/badge/-Website-brightgreen?style=flat-square&logo=googlechrome&logoColor=white" alt="Website"></a>
   <a href="https://arxiv.org/abs/2601.01569"><img src="https://img.shields.io/badge/arXiv-Paper-red?style=flat-square&logo=arxiv" alt="arXiv Paper"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT"></a>
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat-square" alt="Python 3.11+"></a>
-  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.7.1-blue?style=flat-square" alt="PyPI version"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12+-blue?style=flat-square" alt="Python 3.12+"></a>
+  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.7.2-blue?style=flat-square" alt="PyPI version"></a>
 </p>
 
 <p align="center">
@@ -31,7 +31,7 @@ Most LLM agents operate under a text-in-text-out paradigm, with tool interaction
 - **Retrieve** manipulated objects back as native Python types for downstream
 
 <p align="center">
-  <img src="https://github.com/acodercat/cave-agent/raw/master/images/overall.png" alt="CaveAgent Architecture">
+  <video src="https://github.com/acodercat/cave-agent/raw/master/assets/demo.mp4" controls width="600"></video>
 </p>
 
 ## Table of Contents
@@ -253,7 +253,7 @@ orchestrator = CaveAgent(model, runtime=IPythonRuntime(variables=[
 
 # Inject → trigger → retrieve
 await orchestrator.run("Clean raw_data using cleaner, then analyze using analyzer")
-insights = analyzer.await runtime.retrieve("insights")
+insights = await analyzer.runtime.retrieve("insights")
 ```
 
 See [examples/multi_agent.py](examples/multi_agent.py) for a complete example.
@@ -297,7 +297,7 @@ runtime = IPythonRuntime(security_checker=SecurityChecker(rules))
 CaveAgent implements the [Agent Skills](https://agentskills.io) open standard—a portable format for packaging instructions that agents can discover and use. Originally developed by Anthropic and now supported across the AI ecosystem (Claude, Gemini CLI, Cursor, VS Code, and more), Skills enable agents to acquire domain expertise on-demand.
 
 <p align="center">
-  <img src="https://github.com/acodercat/cave-agent/raw/master/images/skills.png" alt="Agent Skills Architecture" width="85%">
+  <img src="https://github.com/acodercat/cave-agent/raw/master/assets/skills.png" alt="Agent Skills Architecture" width="85%">
 </p>
 
 ### Creating a Skill
@@ -402,6 +402,10 @@ When `activate_skill()` is called, these exports are automatically injected into
 
 See [examples/skill_data_processor.py](examples/skill_data_processor.py) for a complete example.
 
+<p align="center">
+  <img src="https://github.com/acodercat/cave-agent/raw/master/assets/overall.png" alt="CaveAgent Architecture">
+</p>
+
 ## Features
 
 - **Code-Based Function Calling**: Leverages LLM's natural coding abilities instead of rigid JSON schemas
@@ -435,15 +439,16 @@ We thank these community to post our work.
 | model | Model | required | LLM model instance (OpenAIServerModel or LiteLLMModel) |
 | runtime | Runtime | None | `IPythonRuntime` (default) or `IPyKernelRuntime` (process-isolated) |
 | skills | List[Skill] | None | List of skill objects to load |
-| max_steps | int | 5 | Maximum execution steps per run |
-| max_history | int | 10 | Maximum conversation history length |
+| max_steps | int | 10 | Maximum execution steps per run |
+| max_history | int | 20 | Maximum conversation history length |
 | max_exec_output | int | 5000 | Max characters in execution output |
+| max_exec_timeout | float \| None | None | Max seconds per code execution. LLM is guided to use timeouts in network/DB calls |
+| display | bool | True | Render events to terminal via Rich (Claude Code-style UI) |
 | instructions | str | default | User instructions defining agent role and behavior |
 | system_instructions | str | default | System-level execution rules and examples |
 | system_prompt_template | str | default | Custom system prompt template |
 | python_block_identifier | str | python | Code block language identifier |
 | messages | List[Message] | None | Initial message history |
-| log_level | LogLevel | DEBUG | Logging verbosity level |
 
 ## LLM Provider Support
 

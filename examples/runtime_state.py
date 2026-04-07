@@ -42,12 +42,12 @@ async def main():
     
     # Sort numbers and get result
     await agent.run("Sort the numbers list")
-    sorted_result = runtime.retrieve('sorted_numbers')
+    sorted_result = await runtime.retrieve('sorted_numbers')
     print("Sorted numbers:", sorted_result)
     
     # Calculate sum and get result
     await agent.run("Calculate the sum of all numbers")
-    total = runtime.retrieve('sum_result')
+    total = await runtime.retrieve('sum_result')
     print("Sum:", total)
 
 if __name__ == "__main__":

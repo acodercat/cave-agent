@@ -1,6 +1,6 @@
-from typing import List, Dict, Optional, Any, AsyncIterator
+from typing import List, Dict, Optional, Any
 
-from .base import Model, ModelResponse, TokenUsage
+from .base import Model, ModelResponse, StreamResponse, TokenUsage
 
 
 class OpenAIServerModel(Model):
@@ -54,16 +54,6 @@ class OpenAIServerModel(Model):
 
         return params
 
-    def _extract_token_usage(self, response: Any) -> TokenUsage:
-        """Extract token usage from OpenAI response."""
-        if hasattr(response, 'usage') and response.usage:
-            return TokenUsage(
-                prompt_tokens=getattr(response.usage, 'prompt_tokens', 0) or 0,
-                completion_tokens=getattr(response.usage, 'completion_tokens', 0) or 0,
-                total_tokens=getattr(response.usage, 'total_tokens', 0) or 0
-            )
-        return TokenUsage()
-
     async def call(self, messages: List[Dict[str, str]]) -> ModelResponse:
         """Generate response using OpenAI API asynchronously."""
         response = await self.client.chat.completions.create(
@@ -80,15 +70,40 @@ class OpenAIServerModel(Model):
             token_usage=self._extract_token_usage(response)
         )
 
-    async def stream(self, messages: List[Dict[str, str]]) -> AsyncIterator[str]:
+    def stream(self, messages: List[Dict[str, str]]) -> StreamResponse:
         """Stream response tokens using OpenAI API."""
-        response = await self.client.chat.completions.create(
-            **self._prepare_params(messages),
-            stream=True
-        )
+        return _OpenAIStreamResponse(self, messages)
 
-        async for chunk in response:
+
+class _OpenAIStreamResponse(StreamResponse):
+    """Async iterator over OpenAI streaming chunks with usage tracking."""
+
+    def __init__(self, model: OpenAIServerModel, messages: List[Dict[str, str]]):
+        super().__init__()
+        self._model = model
+        self._messages = messages
+        self._iterator = None
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> str:
+        if self._iterator is None:
+            response = await self._model.client.chat.completions.create(
+                **self._model._prepare_params(self._messages),
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+            self._iterator = response.__aiter__()
+
+        while True:
+            chunk = await self._iterator.__anext__()
+
+            if hasattr(chunk, "usage") and chunk.usage:
+                self.usage = self._model._extract_token_usage(chunk)
+                continue
+
             if hasattr(chunk, "choices") and len(chunk.choices) > 0:
                 delta = chunk.choices[0].delta
                 if delta.content:
-                    yield delta.content
+                    return delta.content

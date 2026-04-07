@@ -95,7 +95,7 @@ async def main():
     print("Response:", response)
     
     # Retrieve results from Python environment
-    sorted_result = agent2.runtime.retrieve('result')
+    sorted_result = await agent2.runtime.retrieve('result')
     print("Sorted result:", sorted_result)  # [1, 1, 3, 4, 5, 9]
     
     print("\n=== usage 3: Streaming Events ===")

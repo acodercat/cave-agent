@@ -201,6 +201,10 @@ class Runtime:
         """Execute code using the executor."""
         return await self._executor.execute(code)
 
+    async def interrupt(self) -> None:
+        """Interrupt running execution. Override in subclasses that support it."""
+        pass
+
     async def retrieve(self, name: str) -> Any:
         """Get current value of a variable."""
         if name not in self._variables:

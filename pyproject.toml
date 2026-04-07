@@ -1,16 +1,16 @@
 [project]
 name = "cave-agent"
-version = "0.7.1"
+version = "0.7.2"
 description = "CaveAgent is a tool-augmented agent framework that enables function-calling through LLM code generation and provides runtime state management. Unlike traditional JSON-schema approaches, it natively handles complex Python objects like DataFrames and ndarrays within a persistent runtime, enabling lossless data flow across multi-turn interactions."
 readme = "README.md"
 authors = [
     { name = "Ram", email = "codermao@gmail.com" }
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-    "ipython>=9.7.0",
-    "rich>=13.9.4",
-    "pydantic>=2.12.4",
+    "ipython>=9.12.0",
+    "rich>=14.3.3",
+    "pydantic>=2.12.5",
     "pyyaml>=6.0.3",
 ]
 keywords = ["llm", "agent", "function-calling", "tool-calling"]
@@ -18,8 +18,8 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
@@ -29,16 +29,16 @@ Repository = "https://github.com/acodercat/cave-agent"
 
 [project.optional-dependencies]
 litellm = [
-    "litellm>=1.80.5",
+    "litellm>=1.83.4",
 ]
 
 openai = [
-    "openai>=2.8.1",
+    "openai>=2.30.0",
 ]
 
 all = [
-    "litellm>=1.80.5",
-    "openai>=2.8.1",
+    "litellm>=1.83.4",
+    "openai>=2.30.0",
 ]
 ipykernel = [
     "dill>=0.4.1",
@@ -51,11 +51,13 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "build>=1.2.2.post1",
-    "hatch>=1.14.1",
-    "pytest>=9.0.1",
+    "build>=1.4.2",
+    "hatch>=1.16.5",
+    "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
-    "twine>=6.1.0",
-    "litellm>=1.80.5",
-    "openai>=2.8.1",
+    "twine>=6.2.0",
+    "litellm>=1.83.4",
+    "openai>=2.30.0",
+    "dill>=0.4.1",
+    "ipykernel>=7.2.0",
 ]

@@ -39,8 +39,6 @@ DEFAULT_SYSTEM_PROMPT_TEMPLATE = """
 
 {system_instructions}
 
-Current time: {current_time}
-
 You have access to:
 
 <functions>

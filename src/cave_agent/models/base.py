@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, AsyncIterator
+from typing import Any, List, Dict
 from dataclasses import dataclass, field
 
 
@@ -33,11 +33,37 @@ class ModelResponse:
     token_usage: TokenUsage = field(default_factory=TokenUsage)
 
 
+class StreamResponse(ABC):
+    """Async iterator over streamed tokens with token usage available after exhaustion."""
+
+    def __init__(self):
+        self.usage = TokenUsage()
+
+    @abstractmethod
+    def __aiter__(self):
+        ...
+
+    @abstractmethod
+    async def __anext__(self) -> str:
+        ...
+
+
 class Model(ABC):
     """
     Abstract base class for language model engines.
     Defines interface for interacting with different LLM providers.
     """
+
+    @staticmethod
+    def _extract_token_usage(response: Any) -> TokenUsage:
+        """Extract token usage from an LLM API response."""
+        if hasattr(response, "usage") and response.usage:
+            return TokenUsage(
+                prompt_tokens=getattr(response.usage, "prompt_tokens", 0) or 0,
+                completion_tokens=getattr(response.usage, "completion_tokens", 0) or 0,
+                total_tokens=getattr(response.usage, "total_tokens", 0) or 0,
+            )
+        return TokenUsage()
 
     @abstractmethod
     async def call(self, messages: List[Dict[str, str]]) -> ModelResponse:
@@ -49,6 +75,10 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    async def stream(self, messages: List[Dict[str, str]]) -> AsyncIterator[str]:
-        """Stream response tokens from message history asynchronously."""
+    def stream(self, messages: List[Dict[str, str]]) -> StreamResponse:
+        """Stream response tokens from message history asynchronously.
+
+        Returns:
+            A StreamResponse that yields tokens and provides usage after exhaustion.
+        """
         pass

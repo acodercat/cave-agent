@@ -73,12 +73,12 @@ async def main():
 
     # Process data
     await agent.run("Use processor to sort and deduplicate numbers")
-    processed_data = agent.runtime.retrieve('processed_data')
+    processed_data = await agent.runtime.retrieve('processed_data')
     print("Processed data:", processed_data)
 
     # Filter data
     await agent.run("Filter numbers greater than 4")
-    filtered_data = agent.runtime.retrieve('filtered_data')
+    filtered_data = await agent.runtime.retrieve('filtered_data')
     print("Filtered data:", filtered_data)
 
 if __name__ == "__main__":
