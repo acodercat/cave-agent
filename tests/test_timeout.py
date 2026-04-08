@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cave_agent.agent import CaveAgent, EventType, _ExecutionContext
+from cave_agent.agent import CaveAgent, _ExecutionContext
+from cave_agent.types import EventType
 from cave_agent.runtime.executor import ExecutionResult
 
 

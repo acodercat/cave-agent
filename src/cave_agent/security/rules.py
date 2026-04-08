@@ -1,8 +1,11 @@
 import ast
+import logging
 import re
 from abc import ABC, abstractmethod
 from typing import List, Set, Optional
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass()
@@ -140,7 +143,6 @@ class RegexRule(SecurityRule):
                         message=f"Security rule: {self.description} {f'at line {node.lineno}' if hasattr(node, 'lineno') else ''}"
                     ))
             except Exception:
-                # Don't fail analysis due to string conversion issues
-                pass
+                logger.debug("Failed to unparse node for regex check", exc_info=True)
 
         return violations

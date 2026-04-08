@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime
 from enum import Enum
 from typing import AsyncGenerator
+import logging
 
 from .models import Model, TokenUsage
 from .parsing import SegmentType, StreamingTextParser
@@ -21,89 +22,23 @@ from .runtime.executor import ExecutionResult
 from .security import SecurityError
 from .runtime.builtins import activate_skill
 from .skills import Skill, SkillRegistry
+from .compaction import CompactionState, compact_if_needed
 from .utils import extract_python_code
+from .types import (
+    MessageRole, _ROLE_MAP, Message, SystemMessage, UserMessage,
+    AssistantMessage, CodeExecutionMessage, ExecutionResultMessage,
+    EventType, Event,
+)
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PYTHON_BLOCK_IDENTIFIER = "python"
 
-
-# ---------------------------------------------------------------------------
-# Message types
-# ---------------------------------------------------------------------------
-
-
-class MessageRole(str, Enum):
-    SYSTEM = "system"
-    USER = "user"
-    ASSISTANT = "assistant"
-    CODE_EXECUTION = "code_execution"
-    EXECUTION_RESULT = "execution_result"
-
-
-# Maps internal roles to LLM-facing roles
-_ROLE_MAP = {
-    MessageRole.CODE_EXECUTION: MessageRole.ASSISTANT,
-    MessageRole.EXECUTION_RESULT: MessageRole.USER,
-}
-
-
-class Message:
-    """Base class for all message types in the agent conversation."""
-
-    def __init__(self, content: str, role: MessageRole):
-        self.content = content
-        self.role = role
-
-
-class SystemMessage(Message):
-    """System message that provides instructions to the LLM."""
-    def __init__(self, content: str):
-        super().__init__(content, MessageRole.SYSTEM)
-
-
-class UserMessage(Message):
-    """Message from the user to the agent."""
-    def __init__(self, content: str):
-        super().__init__(content, MessageRole.USER)
-
-
-class AssistantMessage(Message):
-    """Message from the assistant (LLM) to the user."""
-    def __init__(self, content: str):
-        super().__init__(content, MessageRole.ASSISTANT)
-
-
-class CodeExecutionMessage(Message):
-    """Message representing code to be executed by the agent."""
-    def __init__(self, content: str):
-        super().__init__(content, MessageRole.CODE_EXECUTION)
-
-
-class ExecutionResultMessage(Message):
-    """Message representing the result from code execution."""
-    def __init__(self, content: str):
-        super().__init__(content, MessageRole.EXECUTION_RESULT)
-
-
-# ---------------------------------------------------------------------------
-# Event / response types
-# ---------------------------------------------------------------------------
-
-
-class EventType(Enum):
-    TEXT = "text"
-    CODE = "code"
-    EXECUTION_OUTPUT = "execution_output"
-    EXECUTION_ERROR = "execution_error"
-    EXECUTION_OUTPUT_EXCEEDED = "execution_output_exceeded"
-    FINAL_RESPONSE = "final_response"
-    MAX_STEPS_REACHED = "max_steps_reached"
-    SECURITY_ERROR = "security_error"
-
-
-class Event:
-    def __init__(self, type: EventType, content: str):
-        self.type = type
-        self.content = content
+MAX_OUTPUT_RECOVERIES = 3
+_RECOVERY_MESSAGE = (
+    "Output limit hit. Resume directly, pick up mid-thought. "
+    "Break remaining work into smaller pieces."
+)
 
 
 class ExecutionStatus(Enum):
@@ -154,11 +89,13 @@ class _ExecutionContext:
         self.total_steps = 0
         self.token_usage = TokenUsage()
         self._completed = False
+        self.output_recoveries = 0
 
     def start(self) -> None:
         self.total_steps = 0
         self.token_usage = TokenUsage()
         self._completed = False
+        self.output_recoveries = 0
 
     def complete(self) -> None:
         self._completed = True
@@ -199,8 +136,8 @@ class CaveAgent:
         instructions: User instructions defining agent role and behavior.
         skills: List of skills to load.
         max_steps: Maximum execution steps before stopping.
-        max_history: Maximum message history to retain.
         max_exec_output: Maximum length of execution output.
+        context_window: Model context window size in tokens for compaction.
         max_exec_timeout: Maximum seconds for a single code execution.
             None means no timeout.
         system_instructions: System-level execution rules and examples.
@@ -224,8 +161,8 @@ class CaveAgent:
         instructions: str = DEFAULT_INSTRUCTIONS,
         skills: list[Skill] | None = None,
         max_steps: int = 10,
-        max_history: int = 20,
         max_exec_output: int = 5000,
+        context_window: int = 128_000,
         max_exec_timeout: float | None = None,
         system_instructions: str = DEFAULT_SYSTEM_INSTRUCTIONS,
         system_prompt_template: str = DEFAULT_SYSTEM_PROMPT_TEMPLATE,
@@ -243,8 +180,9 @@ class CaveAgent:
         )
         self.python_block_identifier = python_block_identifier
         self.messages: list[Message] = list(messages) if messages else []
-        self.max_history = max_history
         self.max_exec_output = max_exec_output
+        self.context_window = context_window
+        self._compaction_state = CompactionState()
         self.max_exec_timeout = max_exec_timeout
         self.display = display
         self._init_skills(skills)
@@ -341,25 +279,62 @@ class CaveAgent:
         )
 
     def add_message(self, message: Message):
-        """Add message with automatic history management."""
+        """Add a message to the conversation history."""
         self.messages.append(message)
-        self._trim_history()
 
     # ------------------------------------------------------------------
     # Step execution
     # ------------------------------------------------------------------
 
+    async def _maybe_compact(self) -> tuple[str | None, int, int]:
+        """Compact conversation history if over the token threshold.
+
+        Returns (tier, before_count, after_count).
+        """
+        before = len(self.messages)
+        self.messages, tier = await compact_if_needed(
+            self.messages, self.model, self._compaction_state,
+            context_window=self.context_window,
+        )
+        after = len(self.messages)
+        if tier:
+            logger.info("Context compacted (tier=%s, %d → %d messages)", tier, before, after)
+        return tier, before, after
+
     async def _execute_step(self, context: _ExecutionContext) -> str:
         """Execute a single step and return the model response."""
+        await self._maybe_compact()  # display handled by _stream_step only
         context.total_steps += 1
 
         model_response = await self.model.call(self._prepare_messages())
         context.add_token_usage(model_response.token_usage)
 
+        if model_response.finish_reason == "length" and context.output_recoveries < MAX_OUTPUT_RECOVERIES:
+            logger.warning("Output truncated (recovery %d/%d)", context.output_recoveries + 1, MAX_OUTPUT_RECOVERIES)
+            self.add_message(AssistantMessage(model_response.content))
+            self.add_message(UserMessage(_RECOVERY_MESSAGE))
+            context.output_recoveries += 1
+            return model_response.content
+
+        context.output_recoveries = 0
         return await self._process_response(model_response.content, context)
 
     async def _stream_step(self, context: _ExecutionContext) -> AsyncGenerator[Event, None]:
         """Execute a single step with streaming output."""
+        from .compaction.tokens import compact_threshold, estimate_tokens
+
+        # Check if full compact will likely be needed (microcompact alone won't suffice).
+        # Yield COMPACTING before the slow LLM call so the user sees the spinner.
+        before = len(self.messages)
+        threshold = compact_threshold(self.context_window)
+        tokens = estimate_tokens(self.messages)
+        if tokens > threshold:
+            yield Event(EventType.COMPACTING, "")
+
+        tier, _, after = await self._maybe_compact()
+        if tier == "full_compact":
+            yield Event(EventType.COMPACTED, f"{before} → {after}")
+
         context.total_steps += 1
 
         chunks: list[str] = []
@@ -390,6 +365,15 @@ class CaveAgent:
         context.add_token_usage(stream_response.usage)
 
         model_response = "".join(chunks)
+
+        if stream_response.finish_reason == "length" and context.output_recoveries < MAX_OUTPUT_RECOVERIES:
+            logger.warning("Output truncated (recovery %d/%d)", context.output_recoveries + 1, MAX_OUTPUT_RECOVERIES)
+            self.add_message(AssistantMessage(model_response))
+            self.add_message(UserMessage(_RECOVERY_MESSAGE))
+            context.output_recoveries += 1
+            return
+
+        context.output_recoveries = 0
         async for event in self._process_response_stream(model_response, context):
             yield event
 
@@ -397,18 +381,29 @@ class CaveAgent:
     # Response processing
     # ------------------------------------------------------------------
 
-    async def _process_response(self, model_response: str, context: _ExecutionContext) -> str:
-        """Process model response and execute code if present."""
-        code_snippet = extract_python_code(model_response, self.python_block_identifier)
+    async def _extract_and_execute(
+        self, model_response: str, context: _ExecutionContext,
+    ) -> _ExecutionOutcome | None:
+        """Extract code from model response and execute it if present.
 
+        Returns the execution outcome, or None if no code was found
+        (in which case the response is added as an AssistantMessage and
+        context is marked complete).
+        """
+        code_snippet = extract_python_code(model_response, self.python_block_identifier)
         if not code_snippet:
             self.add_message(AssistantMessage(model_response))
             context.complete()
-            return model_response
+            return None
 
         self.add_message(CodeExecutionMessage(model_response))
         outcome = await self._execute_code(code_snippet, context)
         self.add_message(ExecutionResultMessage(outcome.next_prompt))
+        return outcome
+
+    async def _process_response(self, model_response: str, context: _ExecutionContext) -> str:
+        """Process model response and execute code if present."""
+        await self._extract_and_execute(model_response, context)
         return model_response
 
     async def _process_response_stream(
@@ -417,18 +412,11 @@ class CaveAgent:
         context: _ExecutionContext,
     ) -> AsyncGenerator[Event, None]:
         """Process model response with streaming events."""
-        code_snippet = extract_python_code(model_response, self.python_block_identifier)
-
-        if not code_snippet:
-            self.add_message(AssistantMessage(model_response))
-            context.complete()
+        outcome = await self._extract_and_execute(model_response, context)
+        if outcome is None:
             yield Event(EventType.FINAL_RESPONSE, model_response)
-            return
-
-        self.add_message(CodeExecutionMessage(model_response))
-        outcome = await self._execute_code(code_snippet, context)
-        self.add_message(ExecutionResultMessage(outcome.next_prompt))
-        yield Event(outcome.event_type, outcome.event_content)
+        else:
+            yield Event(outcome.event_type, outcome.event_content)
 
     # ------------------------------------------------------------------
     # Code execution
@@ -442,17 +430,19 @@ class CaveAgent:
         """Execute code snippet and return the outcome."""
         context.code_snippets.append(code_snippet)
 
-        if self.max_exec_timeout is not None:
-            execution_result = await self._execute_with_timeout(code_snippet)
-            if execution_result is None:
-                return _ExecutionOutcome(
-                    event_type=EventType.EXECUTION_ERROR,
-                    event_content=f"Execution timed out after {self.max_exec_timeout}s",
-                    next_prompt=f"Code execution timed out after {self.max_exec_timeout} seconds. "
-                        "Simplify your code or break it into smaller steps.",
-                )
-        else:
-            execution_result = await self.runtime.execute(code_snippet)
+        execution_result = (
+            await self._execute_with_timeout(code_snippet)
+            if self.max_exec_timeout is not None
+            else await self.runtime.execute(code_snippet)
+        )
+
+        if execution_result is None:
+            return _ExecutionOutcome(
+                event_type=EventType.EXECUTION_ERROR,
+                event_content=f"Execution timed out after {self.max_exec_timeout}s",
+                next_prompt=f"Code execution timed out after {self.max_exec_timeout} seconds. "
+                    "Simplify your code or break it into smaller steps.",
+            )
 
         # Security error
         if not execution_result.success and isinstance(execution_result.error, SecurityError):
@@ -497,7 +487,7 @@ class CaveAgent:
 
         Returns None on timeout, ExecutionResult otherwise.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result_future = loop.run_in_executor(
             None,
             lambda: asyncio.run(self.runtime.execute(code_snippet)),
@@ -528,7 +518,7 @@ class CaveAgent:
             self._skill_registry.add_skills([s for s in skills if s is not None])
         if self._skill_registry.list_skills():
             store = self._skill_registry.build_skill_store()
-            self.runtime._executor.inject_into_namespace("_skill_store", store)
+            self.runtime.inject_into_namespace("_skill_store", store)
             self.runtime.inject_function(Function(activate_skill))
             self.system_instructions += "\n" + SKILLS_INSTRUCTION
 
@@ -569,10 +559,6 @@ class CaveAgent:
             messages.insert(0, reminder)
 
         return messages
-
-    def _trim_history(self):
-        if len(self.messages) > self.max_history:
-            self.messages = [self.messages[0]] + self.messages[1:][-(self.max_history - 1):]
 
     def _build_response(
         self,

@@ -1,7 +1,10 @@
 import ast
+import logging
 from typing import List
 
 from .rules import SecurityRule, SecurityViolation
+
+logger = logging.getLogger(__name__)
 
 
 class SecurityChecker:
@@ -86,7 +89,7 @@ class SecurityChecker:
                 try:
                     violations.extend(rule.check(node))
                 except Exception:
-                    # Don't let rule failures break analysis
+                    logger.warning("Rule %r failed on node %s", rule, type(node).__name__, exc_info=True)
                     continue
 
         return violations

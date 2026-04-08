@@ -4,13 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import dill
 from jupyter_client import AsyncKernelManager
 
-from ..security import SecurityChecker, SecurityError
-from .executor import ExecutionResult, ErrorFeedbackMode
+from ..security import SecurityChecker
+from .executor import ExecutionResult, ErrorFeedbackMode, check_security
+
+# Timeout constants (seconds)
+_KERNEL_READY_MAX_RETRIES = 60
+_KERNEL_INFO_TIMEOUT = 1.0
+_IOPUB_TIMEOUT = 30.0
+_SHELL_REPLY_TIMEOUT = 10.0
+_DRAIN_TIMEOUT = 0.1
 
 
 # Executed once after kernel starts to configure IPython behavior
@@ -47,7 +57,7 @@ class IPyKernelExecutor:
         error_feedback_mode: ErrorFeedbackMode = ErrorFeedbackMode.PLAIN,
     ):
         self._km = AsyncKernelManager(kernel_name="python3")
-        self._kc: Any = None
+        self._kernel_client: Any = None
         self._security_checker = security_checker
         self._error_feedback_mode = error_feedback_mode
         self._started = False
@@ -60,14 +70,14 @@ class IPyKernelExecutor:
     async def start(self) -> None:
         """Start the kernel subprocess and wait until it is ready."""
         await self._km.start_kernel()
-        self._kc = self._km.client()
-        self._kc.start_channels()
+        self._kernel_client = self._km.client()
+        self._kernel_client.start_channels()
 
         # Wait for kernel_info_reply to confirm readiness
-        for _ in range(60):
+        for _ in range(_KERNEL_READY_MAX_RETRIES):
             try:
-                self._kc.kernel_info()
-                msg = await asyncio.wait_for(self._kc.get_shell_msg(), timeout=1.0)
+                self._kernel_client.kernel_info()
+                msg = await asyncio.wait_for(self._kernel_client.get_shell_msg(), timeout=_KERNEL_INFO_TIMEOUT)
                 if msg["header"]["msg_type"] == "kernel_info_reply":
                     break
             except asyncio.TimeoutError:
@@ -83,16 +93,21 @@ class IPyKernelExecutor:
         # Configure IPython inside the kernel
         await self._execute_silent(_KERNEL_SETUP)
 
+    async def interrupt(self) -> None:
+        """Send SIGINT to the kernel to interrupt running execution."""
+        if self._km and await self._km.is_alive():
+            await self._km.interrupt_kernel()
+
     async def stop(self) -> None:
         """Shut down the kernel."""
         try:
-            if self._kc is not None:
-                self._kc.stop_channels()
-                self._kc = None
+            if self._kernel_client is not None:
+                self._kernel_client.stop_channels()
+                self._kernel_client = None
             if await self._km.is_alive():
                 await self._km.shutdown_kernel(now=True)
         except Exception:
-            pass
+            logger.debug("Error during kernel shutdown", exc_info=True)
         self._started = False
 
     # ------------------------------------------------------------------
@@ -115,7 +130,7 @@ class IPyKernelExecutor:
             "import dill as _d, base64 as _b\n"
             f"display({{'application/x-dill': _b.b64encode(_d.dumps({name})).decode()}}, raw=True)"
         )
-        msg_id = self._kc.execute(code)
+        msg_id = self._kernel_client.execute(code)
         async for msg in self._iopub_for(msg_id):
             if msg["header"]["msg_type"] == "display_data":
                 encoded = msg["content"]["data"].get("application/x-dill")
@@ -136,22 +151,15 @@ class IPyKernelExecutor:
         if not self._started:
             raise RuntimeError("Kernel not started — call start() first")
 
-        # Security check runs on the host side (before sending to kernel)
-        if self._security_checker:
-            violations = self._security_checker.check_code(code)
-            if violations:
-                details = [str(v) for v in violations]
-                msg = (
-                    f"Code execution blocked: {len(violations)} violations found:\n"
-                    + "\n".join(f"  - {d}" for d in details)
-                )
-                return ExecutionResult(error=SecurityError(msg))
+        violation = check_security(self._security_checker, code)
+        if violation:
+            return violation
 
         # Flush pending injections
         await self._flush_injections()
 
         # Send code to kernel
-        msg_id = self._kc.execute(code)
+        msg_id = self._kernel_client.execute(code)
         return await self._collect_result(msg_id)
 
     # ------------------------------------------------------------------
@@ -169,20 +177,20 @@ class IPyKernelExecutor:
     # Internals
     # ------------------------------------------------------------------
 
-    async def _iopub_for(self, msg_id: str, timeout: float = 30.0):
+    async def _iopub_for(self, msg_id: str, timeout: float = _IOPUB_TIMEOUT):
         """Yield IOPub messages belonging to *msg_id* until kernel is idle."""
         while True:
-            msg = await asyncio.wait_for(self._kc.get_iopub_msg(), timeout=timeout)
+            msg = await asyncio.wait_for(self._kernel_client.get_iopub_msg(), timeout=timeout)
             if msg["parent_header"].get("msg_id") != msg_id:
                 continue
             yield msg
             if msg["header"]["msg_type"] == "status" and msg["content"]["execution_state"] == "idle":
                 return
 
-    async def _shell_reply_for(self, msg_id: str, timeout: float = 10.0) -> dict:
+    async def _shell_reply_for(self, msg_id: str, timeout: float = _SHELL_REPLY_TIMEOUT) -> dict:
         """Wait for the shell reply matching *msg_id*."""
         while True:
-            msg = await asyncio.wait_for(self._kc.get_shell_msg(), timeout=timeout)
+            msg = await asyncio.wait_for(self._kernel_client.get_shell_msg(), timeout=timeout)
             if msg["parent_header"].get("msg_id") == msg_id:
                 return msg
 
@@ -190,7 +198,7 @@ class IPyKernelExecutor:
         """Drain any stale messages from the IOPub channel."""
         while True:
             try:
-                await asyncio.wait_for(self._kc.get_iopub_msg(), timeout=0.1)
+                await asyncio.wait_for(self._kernel_client.get_iopub_msg(), timeout=_DRAIN_TIMEOUT)
             except asyncio.TimeoutError:
                 break
 
@@ -204,7 +212,7 @@ class IPyKernelExecutor:
 
     async def _execute_silent(self, code: str) -> None:
         """Run *code* on the kernel, discard output, raise on error."""
-        msg_id = self._kc.execute(code, silent=True)
+        msg_id = self._kernel_client.execute(code, silent=True)
         reply = await self._shell_reply_for(msg_id)
         if reply["content"].get("status") == "error":
             raise RuntimeError(
@@ -237,8 +245,8 @@ class IPyKernelExecutor:
                             stdout_parts.append(f"{content['ename']}: {content['evalue']}")
 
         except asyncio.TimeoutError:
-            error = TimeoutError("Execution timed out after 30s")
-            stdout_parts.append("TimeoutError: Execution timed out after 30s")
+            error = TimeoutError(f"Execution timed out after {_IOPUB_TIMEOUT}s")
+            stdout_parts.append(f"TimeoutError: Execution timed out after {_IOPUB_TIMEOUT}s")
 
         stdout = "".join(stdout_parts) or None
         return ExecutionResult(error=error, stdout=stdout)

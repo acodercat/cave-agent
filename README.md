@@ -15,7 +15,7 @@
   <a href="https://arxiv.org/abs/2601.01569"><img src="https://img.shields.io/badge/arXiv-Paper-red?style=flat-square&logo=arxiv" alt="arXiv Paper"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12+-blue?style=flat-square" alt="Python 3.12+"></a>
-  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.7.2-blue?style=flat-square" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.7.3-blue?style=flat-square" alt="PyPI version"></a>
 </p>
 
 <p align="center">
@@ -50,6 +50,8 @@ https://github.com/user-attachments/assets/0e4a23b0-1afb-4408-8d87-ae1e13388aae
   - [How Skills Load](#how-skills-load-progressive-disclosure)
   - [Using Skills](#using-skills)
   - [Injection Module](#injection-module-caveagent-extension)
+- [Context Compaction](#context-compaction)
+- [API Resilience](#api-resilience)
 - [Features](#features)
 - [Configuration](#configuration)
 - [LLM Provider Support](#llm-provider-support)
@@ -405,6 +407,60 @@ See [examples/skill_data_processor.py](examples/skill_data_processor.py) for a c
   <img src="https://github.com/acodercat/cave-agent/raw/master/assets/overall.png" alt="CaveAgent Architecture">
 </p>
 
+## Context Compaction
+
+Long conversations inevitably fill up the model's context window. CaveAgent implements a multi-tier compaction strategy inspired by [Claude Code](https://docs.anthropic.com/en/docs/claude-code)'s context management system.
+
+**How it works:**
+
+```
+Token usage exceeds threshold?
+        |
+        v
+  Tier 1: Microcompact (no LLM, instant)
+  Clear old execution results, keep recent 6.
+  Tokens under threshold? → done
+        |
+        v
+  Tier 2: Full Compact (LLM summarization)
+  Summarize older messages, keep recent half.
+  Uses dual-phase prompt: <analysis> (discarded) + <summary> (kept).
+        |
+        v
+  Tier 3: Trim Fallback (last resort)
+  Keep recent half of messages, drop the rest.
+```
+
+The system message (index 0) is always preserved. A **circuit breaker** stops attempting LLM summarization after 3 consecutive failures, falling back to trim to avoid wasting API calls.
+
+```python
+agent = CaveAgent(
+    model,
+    runtime=runtime,
+    context_window=128_000,  # triggers compaction at ~77% usage
+)
+```
+
+## API Resilience
+
+CaveAgent handles transient API failures and output truncation automatically.
+
+**Retry with exponential backoff:** Rate limits (429), server errors (5xx), timeouts (408), and connection errors are retried up to 5 times with exponential backoff (0.5s, 1s, 2s, 4s, 8s) plus jitter. `Retry-After` headers are respected when present.
+
+**Output truncation recovery:** When the model's response is cut off (`finish_reason="length"`), the agent automatically appends the partial response to history and asks the model to continue from where it stopped. This repeats up to 3 times before giving up.
+
+```
+Model response truncated (finish_reason="length")
+        |
+        v
+  Append partial response as AssistantMessage
+  Inject: "Output limit hit. Resume directly, pick up mid-thought."
+  Retry (up to 3 times)
+        |
+        v
+  Model continues from the cutoff point
+```
+
 ## Features
 
 - **Code-Based Function Calling**: Leverages LLM's natural coding abilities instead of rigid JSON schemas
@@ -416,6 +472,8 @@ See [examples/skill_data_processor.py](examples/skill_data_processor.py) for a c
   - Access execution results and maintain state across interactions
 - **[Agent Skills](https://agentskills.io)**: Implements the open Agent Skills standard for modular, portable instruction packages. CaveAgent extends the standard with runtime injection (`injection.py`).
 - **Multi-Agent Coordination**: Control sub-agents programmatically through runtime injection and retrieval. Shared runtimes enable instant state synchronization.
+- **Context Compaction**: Inspired by [Claude Code](https://docs.anthropic.com/en/docs/claude-code)'s multi-tier context management — microcompact (clear old execution results, no LLM) → full compact (LLM summarization with dual-phase analysis+summary prompt) → trim fallback, with circuit breaker protection against cascading failures
+- **API Resilience**: Automatic retry with exponential backoff + jitter for rate limits (429), server errors (5xx), and connection failures. Output truncation recovery automatically continues when the model's response is cut off by `max_tokens`
 - **Streaming & Async**: Real-time event streaming and full async/await support for optimal performance
 - **Execution Control**: Configurable step limits and error handling to prevent infinite loops
 - **Flexible LLM Support**: Works with any LLM provider via OpenAI-compatible APIs or LiteLLM
@@ -439,7 +497,7 @@ We thank these community to post our work.
 | runtime | Runtime | None | `IPythonRuntime` (default) or `IPyKernelRuntime` (process-isolated) |
 | skills | List[Skill] | None | List of skill objects to load |
 | max_steps | int | 10 | Maximum execution steps per run |
-| max_history | int | 20 | Maximum conversation history length |
+| context_window | int | 128000 | Model context window size in tokens. Controls when context compaction triggers |
 | max_exec_output | int | 5000 | Max characters in execution output |
 | max_exec_timeout | float \| None | None | Max seconds per code execution. LLM is guided to use timeouts in network/DB calls |
 | display | bool | True | Render events to terminal via Rich (Claude Code-style UI) |

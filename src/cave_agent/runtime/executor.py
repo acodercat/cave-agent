@@ -8,6 +8,21 @@ import gc
 from ..security import SecurityChecker, SecurityError
 
 
+def check_security(checker: SecurityChecker | None, code: str) -> 'ExecutionResult | None':
+    """Run security checks and return an ExecutionResult on violation, or None if clean."""
+    if not checker:
+        return None
+    violations = checker.check_code(code)
+    if not violations:
+        return None
+    details = [str(v) for v in violations]
+    msg = (
+        f"Code execution blocked: {len(violations)} violations found:\n"
+        + "\n".join(f"  - {d}" for d in details)
+    )
+    return ExecutionResult(error=SecurityError(msg))
+
+
 class ExecutionResult:
     """
     Represents the result of code execution.
@@ -55,17 +70,9 @@ class IPythonExecutor:
             ExecutionResult with success status and output or error
         """
         try:
-            # Perform security check
-            if self._security_checker:
-                violations = self._security_checker.check_code(code)
-                if violations:
-                    violation_details = [str(v) for v in violations]
-                    error_message = (
-                        f"Code execution blocked: {len(violations)} violations found:\n"
-                        + "\n".join(f"  - {detail}" for detail in violation_details)
-                    )
-                    security_error = SecurityError(error_message)
-                    return ExecutionResult(error=security_error, stdout=None)
+            violation = check_security(self._security_checker, code)
+            if violation:
+                return violation
 
             # Execute the code
             with capture_output() as output:
@@ -96,7 +103,7 @@ class IPythonExecutor:
         """Get a value from the execution namespace."""
         return self._shell.user_ns.get(name)
 
-    def reset(self):
+    async def reset(self):
         """Reset the shell"""
         self._shell.reset()
         gc.collect()
