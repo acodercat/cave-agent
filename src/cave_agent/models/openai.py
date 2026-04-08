@@ -1,6 +1,7 @@
 from typing import List, Dict, Optional, Any
 
 from .base import Model, ModelResponse, StreamResponse, TokenUsage
+from .retry import with_retry
 
 
 class OpenAIServerModel(Model):
@@ -46,28 +47,25 @@ class OpenAIServerModel(Model):
 
     def _prepare_params(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         """Prepare parameters for OpenAI API call."""
-        params = {
+        return {
             "model": self.model_id,
             "messages": messages,
             **self.kwargs,
         }
 
-        return params
-
     async def call(self, messages: List[Dict[str, str]]) -> ModelResponse:
         """Generate response using OpenAI API asynchronously."""
-        response = await self.client.chat.completions.create(
-            **self._prepare_params(messages),
-            stream=False
+        params = self._prepare_params(messages)
+        response = await with_retry(
+            lambda: self.client.chat.completions.create(**params, stream=False)
         )
 
-        content = ""
-        if hasattr(response, "choices") and len(response.choices) > 0:
-            content = response.choices[0].message.content or ""
+        content, finish_reason = self._extract_response(response)
 
         return ModelResponse(
             content=content,
-            token_usage=self._extract_token_usage(response)
+            token_usage=self._extract_token_usage(response),
+            finish_reason=finish_reason,
         )
 
     def stream(self, messages: List[Dict[str, str]]) -> StreamResponse:
@@ -89,10 +87,11 @@ class _OpenAIStreamResponse(StreamResponse):
 
     async def __anext__(self) -> str:
         if self._iterator is None:
-            response = await self._model.client.chat.completions.create(
-                **self._model._prepare_params(self._messages),
-                stream=True,
-                stream_options={"include_usage": True},
+            params = self._model._prepare_params(self._messages)
+            response = await with_retry(
+                lambda: self._model.client.chat.completions.create(
+                    **params, stream=True, stream_options={"include_usage": True},
+                )
             )
             self._iterator = response.__aiter__()
 
@@ -103,7 +102,6 @@ class _OpenAIStreamResponse(StreamResponse):
                 self.usage = self._model._extract_token_usage(chunk)
                 continue
 
-            if hasattr(chunk, "choices") and len(chunk.choices) > 0:
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    return delta.content
+            text = self._process_stream_chunk(chunk)
+            if text is not None:
+                return text

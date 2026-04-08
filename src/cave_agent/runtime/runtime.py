@@ -197,6 +197,14 @@ class Runtime:
         if isinstance(type_hint, type):
             self._try_auto_inject_type(type_hint, include_schema=False, include_doc=False)
 
+    def inject_into_namespace(self, name: str, value: Any) -> None:
+        """Inject a value directly into the executor namespace."""
+        self._executor.inject_into_namespace(name, value)
+
+    async def get_from_namespace(self, name: str) -> Any:
+        """Get a value from the executor namespace without requiring pre-registration."""
+        return await self._executor.get_from_namespace(name)
+
     async def execute(self, code: str) -> ExecutionResult:
         """Execute code using the executor."""
         return await self._executor.execute(code)
@@ -241,9 +249,9 @@ class Runtime:
 
         return "\n".join(schemas) if schemas else "No types available"
 
-    def reset(self):
+    async def reset(self):
         """Reset the runtime."""
-        self._executor.reset()
+        await self._executor.reset()
         self._functions.clear()
         self._variables.clear()
         self._types.clear()

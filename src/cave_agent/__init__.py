@@ -1,4 +1,5 @@
-from .agent import CaveAgent, Message, MessageRole, EventType
+from .agent import CaveAgent
+from .types import Message, MessageRole, EventType
 from .display import with_display, render_events, render_user_prompt
 from .models import Model, ModelResponse, TokenUsage, OpenAIServerModel, LiteLLMModel
 from .runtime import Runtime, IPythonRuntime, Function, Variable, Type

@@ -31,6 +31,7 @@ class ModelResponse:
     """Response from an LLM model call including token usage."""
     content: str
     token_usage: TokenUsage = field(default_factory=TokenUsage)
+    finish_reason: str | None = None
 
 
 class StreamResponse(ABC):
@@ -38,6 +39,21 @@ class StreamResponse(ABC):
 
     def __init__(self):
         self.usage = TokenUsage()
+        self.finish_reason: str | None = None
+
+    def _process_stream_chunk(self, chunk: Any) -> str | None:
+        """Extract content text from a streaming chunk, updating finish_reason.
+
+        Returns the content string if present, None otherwise.
+        """
+        if hasattr(chunk, "choices") and len(chunk.choices) > 0:
+            choice = chunk.choices[0]
+            if choice.finish_reason:
+                self.finish_reason = choice.finish_reason
+                return None
+            if choice.delta.content:
+                return choice.delta.content
+        return None
 
     @abstractmethod
     def __aiter__(self):
@@ -64,6 +80,16 @@ class Model(ABC):
                 total_tokens=getattr(response.usage, "total_tokens", 0) or 0,
             )
         return TokenUsage()
+
+    @staticmethod
+    def _extract_response(response: Any) -> tuple[str, str | None]:
+        """Extract content and finish_reason from an OpenAI-style response."""
+        content = ""
+        finish_reason = None
+        if hasattr(response, "choices") and len(response.choices) > 0:
+            content = response.choices[0].message.content or ""
+            finish_reason = response.choices[0].finish_reason
+        return content, finish_reason
 
     @abstractmethod
     async def call(self, messages: List[Dict[str, str]]) -> ModelResponse:

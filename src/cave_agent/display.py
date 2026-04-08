@@ -13,9 +13,10 @@ from typing import AsyncGenerator
 from rich.console import Console, Group
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.syntax import Syntax
 from rich.text import Text
 
-from .agent import Event, EventType
+from .types import Event, EventType
 from .models import TokenUsage
 from .utils import extract_python_code
 
@@ -48,11 +49,8 @@ async def render_events(
     context=None,
 ) -> None:
     """Consume an async event stream, printing each event to the terminal."""
-    display = _DisplayState()
-    async for event in events:
-        display.handle(event)
-    token_usage = getattr(context, "token_usage", None) if context else None
-    display.finalize(token_usage)
+    async for _ in with_display(events, context):
+        pass
 
 
 def render_user_prompt(text: str) -> None:
@@ -96,6 +94,10 @@ class _DisplayState:
                 self._handle_final()
             case EventType.MAX_STEPS_REACHED:
                 self._handle_max_steps(event)
+            case EventType.COMPACTING:
+                self._handle_compacting()
+            case EventType.COMPACTED:
+                self._handle_compacted(event)
 
     def _handle_text(self, event: Event) -> None:
         if self._mode == "code":
@@ -126,9 +128,10 @@ class _DisplayState:
         code = extract_python_code(event.content, "python") or event.content
 
         console.print(Text.assemble(("● ", "blue"), ("Code", "bold")))
-        lines = code.strip().splitlines()
-        if lines:
-            _print_prefixed_lines(lines, "dim")
+        code = code.strip()
+        if code:
+            syntax = Syntax(code, "python", theme="one-dark", padding=(0, 2))
+            console.print(syntax)
 
         # Show "Running…" while code executes
         self._live = Live(
@@ -169,6 +172,27 @@ class _DisplayState:
     def _handle_final(self) -> None:
         self._stop_live()
         self._text_buffer.clear()
+
+    def _handle_compacting(self) -> None:
+        self._stop_live()
+        console.print(Text.assemble(
+            ("● ", "blue"),
+            ("Compacting conversation", "bold"),
+            ("...", "bold"),
+        ))
+        self._live = Live(
+            Text(f"{_RESULT_PREFIX}Summarizing...", style="dim"),
+            console=console,
+            refresh_per_second=4,
+            transient=True,
+        )
+        self._live.start()
+
+    def _handle_compacted(self, event: Event) -> None:
+        self._stop_live()
+        if event.content:
+            console.print(Text(f"{_RESULT_PREFIX}Compacted {event.content} messages", style="dim"))
+        console.print()
 
     def _handle_max_steps(self, event: Event) -> None:
         self._stop_live()

@@ -11,8 +11,8 @@ class SegmentType(Enum):
 class Segment:
     """Represents a parsed content segment."""
 
-    def __init__(self, type: SegmentType, content: str) -> None:
-        self.type = type
+    def __init__(self, segment_type: SegmentType, content: str) -> None:
+        self.type = segment_type
         self.content = content
 
 
@@ -47,6 +47,13 @@ class StreamingTextParser:
         self.language_identifier = language_identifier
         self.first_code_block_completed = False
         self._reset_state()
+        self._handlers = {
+            self.Mode.TEXT: self._handle_text_mode,
+            self.Mode.BACKTICK_COUNT: self._handle_backtick_count_mode,
+            self.Mode.LANGUAGE_MATCH: self._handle_language_match_mode,
+            self.Mode.CODE: self._handle_code_mode,
+            self.Mode.CODE_END_CHECK: self._handle_code_end_check_mode,
+        }
 
     def process_chunk(self, chunk: str) -> List[Segment]:
         """
@@ -123,16 +130,7 @@ class StreamingTextParser:
         Returns:
             List of segments generated from this character
         """
-        # Dispatch to appropriate handler based on current mode
-        handlers = {
-            self.Mode.TEXT: self._handle_text_mode,
-            self.Mode.BACKTICK_COUNT: self._handle_backtick_count_mode,
-            self.Mode.LANGUAGE_MATCH: self._handle_language_match_mode,
-            self.Mode.CODE: self._handle_code_mode,
-            self.Mode.CODE_END_CHECK: self._handle_code_end_check_mode,
-        }
-
-        handler = handlers.get(self.mode)
+        handler = self._handlers.get(self.mode)
         return handler(char) if handler else []
 
     def _handle_text_mode(self, char: str) -> List[Segment]:

@@ -1,6 +1,7 @@
 from typing import List, Dict, Optional, Any
 
 from .base import Model, ModelResponse, StreamResponse, TokenUsage
+from .retry import with_retry
 
 
 class LiteLLMModel(Model):
@@ -41,8 +42,8 @@ class LiteLLMModel(Model):
         self.api_key = api_key
 
     def _prepare_params(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Prepare parameters for API call"""
-        params = {
+        """Prepare parameters for API call."""
+        return {
             "model": self.model_id,
             "api_base": self.base_url,
             "api_key": self.api_key,
@@ -50,20 +51,21 @@ class LiteLLMModel(Model):
             **self.kwargs,
         }
 
-        return params
-
     async def call(self, messages: List[Dict[str, str]]) -> ModelResponse:
         """Generate response."""
         import litellm
-        response = await litellm.acompletion(**self._prepare_params(messages), stream=False)
 
-        content = ""
-        if hasattr(response, "choices") and len(response.choices) > 0:
-            content = response.choices[0].message.content or ""
+        params = self._prepare_params(messages)
+        response = await with_retry(
+            lambda: litellm.acompletion(**params, stream=False)
+        )
+
+        content, finish_reason = self._extract_response(response)
 
         return ModelResponse(
             content=content,
-            token_usage=self._extract_token_usage(response)
+            token_usage=self._extract_token_usage(response),
+            finish_reason=finish_reason,
         )
 
     def stream(self, messages: List[Dict[str, str]]) -> StreamResponse:
@@ -86,14 +88,15 @@ class _LiteLLMStreamResponse(StreamResponse):
     async def __anext__(self) -> str:
         if self._iterator is None:
             import litellm
-            response = await litellm.acompletion(
-                **self._model._prepare_params(self._messages), stream=True,
+
+            params = self._model._prepare_params(self._messages)
+            response = await with_retry(
+                lambda: litellm.acompletion(**params, stream=True)
             )
             self._iterator = response.__aiter__()
 
         while True:
             chunk = await self._iterator.__anext__()
-            if hasattr(chunk, "choices") and len(chunk.choices) > 0:
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    return delta.content
+            text = self._process_stream_chunk(chunk)
+            if text is not None:
+                return text

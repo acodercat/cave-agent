@@ -39,7 +39,7 @@ def runtime_with_function():
 async def test_basic_execution(simple_runtime):
     """Test basic code execution works"""
     await simple_runtime.execute("x = 5 + 3")
-    result = await simple_runtime._executor.get_from_namespace('x')
+    result = await simple_runtime.get_from_namespace('x')
     assert result == 8
 
 
@@ -62,7 +62,7 @@ async def test_variable_usage(runtime_with_data):
 async def test_function_usage(runtime_with_function):
     """Test using injected functions"""
     await runtime_with_function.execute("result = multiply(6, 7)")
-    result = await runtime_with_function._executor.get_from_namespace('result')
+    result = await runtime_with_function.get_from_namespace('result')
     assert result == 42
 
 @pytest.mark.asyncio
@@ -72,7 +72,7 @@ async def test_multiple_executions(simple_runtime):
     await simple_runtime.execute("b = a * 2")
     await simple_runtime.execute("c = a + b")
     
-    result = await simple_runtime._executor.get_from_namespace('c')
+    result = await simple_runtime.get_from_namespace('c')
     assert result == 30
 
 
@@ -224,7 +224,7 @@ class TestTypeInjection:
     async def test_type_available_in_namespace(self):
         """Injected type is available in execution namespace."""
         runtime = IPythonRuntime(types=[Type(Light)])
-        assert await runtime._executor.get_from_namespace("Light") is Light
+        assert await runtime.get_from_namespace("Light") is Light
 
 
 @pytest.mark.asyncio
@@ -242,7 +242,7 @@ class TestTypeExecution:
         assert "Light" in runtime._types
 
         result = await runtime.execute("result = isinstance(device, Light)")
-        assert await runtime._executor.get_from_namespace("result") is True
+        assert await runtime.get_from_namespace("result") is True
 
     async def test_isinstance_check_negative(self):
         """isinstance returns False for non-matching type."""
@@ -253,14 +253,14 @@ class TestTypeExecution:
         )
 
         result = await runtime.execute("result = isinstance(device, Lock)")
-        assert await runtime._executor.get_from_namespace("result") is False
+        assert await runtime.get_from_namespace("result") is False
 
     async def test_instantiate_type(self):
         """Can instantiate injected type."""
         runtime = IPythonRuntime(types=[Type(Light)])
 
         await runtime.execute("light = Light('Bedroom')")
-        light = await runtime._executor.get_from_namespace("light")
+        light = await runtime.get_from_namespace("light")
         assert isinstance(light, Light)
         assert light.name == "Bedroom"
 
@@ -272,10 +272,10 @@ class TestTypeExecution:
 light = Light('Bedroom')
 result = light.turn_on()
 """)
-        result = await runtime._executor.get_from_namespace("result")
+        result = await runtime.get_from_namespace("result")
         assert result == "Bedroom turned on"
 
-        light = await runtime._executor.get_from_namespace("light")
+        light = await runtime.get_from_namespace("light")
         assert light.is_on is True
 
     async def test_filter_by_type(self):
@@ -287,7 +287,7 @@ result = light.turn_on()
         )
 
         await runtime.execute("lights = [d for d in devices if isinstance(d, Light)]")
-        lights = await runtime._executor.get_from_namespace("lights")
+        lights = await runtime.get_from_namespace("lights")
         assert len(lights) == 2
         assert all(isinstance(l, Light) for l in lights)
 
@@ -296,7 +296,7 @@ result = light.turn_on()
         runtime = IPythonRuntime(types=[Type(DataPoint)])
 
         await runtime.execute("point = DataPoint(x=1.0, y=2.0)")
-        point = await runtime._executor.get_from_namespace("point")
+        point = await runtime.get_from_namespace("point")
         assert point.x == 1.0
         assert point.y == 2.0
 
@@ -305,7 +305,7 @@ result = light.turn_on()
         runtime = IPythonRuntime(types=[Type(Priority)])
 
         await runtime.execute("p = Priority.HIGH")
-        p = await runtime._executor.get_from_namespace("p")
+        p = await runtime.get_from_namespace("p")
         assert p == Priority.HIGH
         assert p.value == 3
 
@@ -443,7 +443,7 @@ class TestTypeAutoInjection:
         runtime = IPythonRuntime(functions=[Function(create_lock)])
 
         assert "Lock" in runtime._types
-        assert await runtime._executor.get_from_namespace("Lock") is Lock
+        assert await runtime.get_from_namespace("Lock") is Lock
 
     def test_function_auto_injects_multiple_types(self):
         """Function with multiple custom types injects all."""
@@ -519,19 +519,20 @@ class TestTypeAutoInjection:
 class TestTypeReset:
     """Test Type behavior with runtime reset."""
 
-    def test_reset_clears_types(self):
+    @pytest.mark.asyncio
+    async def test_reset_clears_types(self):
         """Reset clears injected types."""
         runtime = IPythonRuntime(types=[Type(Light)])
         assert "Light" in runtime._types
 
-        runtime.reset()
+        await runtime.reset()
         assert len(runtime._types) == 0
 
     @pytest.mark.asyncio
     async def test_reset_clears_type_from_namespace(self):
         """Reset removes type from execution namespace."""
         runtime = IPythonRuntime(types=[Type(Light)])
-        assert await runtime._executor.get_from_namespace("Light") is Light
+        assert await runtime.get_from_namespace("Light") is Light
 
-        runtime.reset()
-        assert await runtime._executor.get_from_namespace("Light") is None
+        await runtime.reset()
+        assert await runtime.get_from_namespace("Light") is None
