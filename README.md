@@ -1,0 +1,552 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.svg">
+    <img src="assets/logo-light.svg" alt="CaveAgent" width="50%">
+  </picture>
+</p>
+
+<h3 align="center">
+  <b>CaveAgent: Transforming LLMs into Stateful Runtime Operators </b>
+</h3>
+
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12+-blue?style=flat-square" alt="Python 3.12+"></a>
+</p>
+
+<p align="center">
+  <em>"From text-in-text-out to (text&amp;object)-in-(text&amp;object)-out"</em>
+</p>
+
+---
+
+Most LLM agents operate under a text-in-text-out paradigm, with tool interactions constrained to JSON primitives. CaveAgent breaks this with **Stateful Runtime Management**—a persistent Python runtime with direct **variable injection and retrieval**:
+
+- **Inject** any Python object into the runtime—DataFrames, models, database connections, custom class instances—as first-class variables the LLM can manipulate
+- **Persist** state across turns without serialization; objects live in the runtime, not in the context window
+- **Retrieve** manipulated objects back as native Python types for downstream
+
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Hello World](#hello-world)
+- [Runtimes](#runtimes)
+- [Examples](#examples)
+  - [Data Visualization](#data-visualization)
+  - [Function Calling](#function-calling)
+  - [Stateful Object Interactions](#stateful-object-interactions)
+  - [Multi-Agent Coordination](#multi-agent-coordination)
+  - [Real-time Streaming](#real-time-streaming)
+  - [Security Rules](#security-rules)
+- [Agent Skills](#agent-skills)
+  - [Creating a Skill](#creating-a-skill)
+  - [How Skills Load](#how-skills-load-progressive-disclosure)
+  - [Using Skills](#using-skills)
+  - [Injection Module](#injection-module-caveagent-extension)
+- [Context Compaction](#context-compaction)
+- [API Resilience](#api-resilience)
+- [Features](#features)
+- [Configuration](#configuration)
+- [LLM Provider Support](#llm-provider-support)
+
+## Installation
+
+```bash
+pip install 'cave-agent[all]'
+```
+
+Choose your installation:
+
+```bash
+# OpenAI support
+pip install 'cave-agent[openai]'
+
+# 100+ LLM providers via LiteLLM
+pip install 'cave-agent[litellm]'
+
+# Process-isolated kernel runtime (IPyKernelRuntime)
+pip install 'cave-agent[ipykernel]'
+```
+
+## Hello World
+
+```python
+import asyncio
+from cave_agent import CaveAgent
+from cave_agent.runtime import IPythonRuntime, Variable, Function
+from cave_agent.models import LiteLLMModel
+
+model = LiteLLMModel(model_id="model-id", api_key="your-api-key", custom_llm_provider="openai")
+
+async def main():
+    def reverse(s: str) -> str:
+        """Reverse a string"""
+        return s[::-1]
+
+    runtime = IPythonRuntime(
+        variables=[
+            Variable("secret", "!dlrow ,olleH", "A reversed message"),
+            Variable("greeting", "", "Store the reversed message"),
+        ],
+        functions=[Function(reverse)],
+    )
+    agent = CaveAgent(model, runtime=runtime)
+    response = await agent.run("Reverse the secret")
+    print(await runtime.retrieve("secret"))  # Hello, world!
+    print(response.content)              # Agent's text response
+
+asyncio.run(main())
+```
+
+## Runtimes
+
+CaveAgent provides two runtime backends. Both share the same API for injecting functions, variables, and types — choose based on your trust and isolation requirements.
+
+### IPythonRuntime (default)
+
+Code runs **in the same process** via an embedded IPython shell. Injected objects (DataFrames, DB connections, custom classes) are accessed directly — no serialization overhead.
+
+```python
+from cave_agent.runtime import IPythonRuntime, Function, Variable
+
+runtime = IPythonRuntime(
+    functions=[Function(my_func)],
+    variables=[Variable("data", my_dataframe, "Input data")],
+)
+agent = CaveAgent(model, runtime=runtime)
+```
+
+Best for: trusted environments, internal tools, when you need zero-overhead access to complex Python objects.
+
+### IPyKernelRuntime (process-isolated)
+
+Code runs in a **separate IPython kernel process**. If the code crashes (segfault, OOM, infinite loop), the host process stays alive — just reset the kernel and continue.
+
+```bash
+pip install 'cave-agent[ipykernel]'
+```
+
+```python
+from cave_agent.runtime import IPyKernelRuntime, Function, Variable
+
+async with IPyKernelRuntime(
+    functions=[Function(my_func)],
+    variables=[Variable("data", [1, 2, 3], "Input data")],
+) as runtime:
+    agent = CaveAgent(model, runtime=runtime)
+    response = await agent.run("Analyze the data")
+```
+
+Injected objects are serialized via [dill](https://github.com/uqfoundation/dill), which supports local functions, closures, lambdas, and most Python objects.
+
+Best for: untrusted code execution, multi-tenant environments, sandboxed agent workflows.
+
+### Comparison
+
+| | IPythonRuntime | IPyKernelRuntime |
+|---|---|---|
+| Isolation | Same process | Separate process |
+| Crash impact | Host process dies | Kernel restarts, host survives |
+| Object injection | Direct reference, zero-copy | Serialized via dill |
+| Startup | Instant | ~1s (kernel launch) |
+| Local functions / closures | Always works | Works (via dill) |
+| Requires | *(included)* | `pip install 'cave-agent[ipykernel]'` |
+
+## Examples
+
+### Data Visualization
+
+```python
+from cave_agent import CaveAgent
+from cave_agent.runtime import IPythonRuntime, Variable
+from cave_agent.models import LiteLLMModel
+
+model = LiteLLMModel(model_id="model-id", api_key="your-api-key", custom_llm_provider="openai")
+
+# 1. Inject — real DB connection & chart config manager
+runtime = IPythonRuntime(
+    variables=[
+        Variable("engine", database_engine),             # SQLAlchemy Engine
+        Variable("echarts_config_manager", EChartsConfigManager()),  # Chart collector
+    ]
+)
+agent = CaveAgent(model, runtime=runtime)
+
+# 2. Query — LLM sees object types, not data
+await agent.run("Show me the air quality trend for the past week")
+
+# LLM generates & executes:
+#   df = pd.read_sql("SELECT * FROM air_quality WHERE ...", engine)
+#   echarts_config_manager.add_config({
+#       "title": {"text": "Air Quality - Past Week"},
+#       "xAxis": {"data": dates},
+#       "series": [{"name": "PM2.5", "type": "line", "data": ...}]
+#   })
+
+# 3. Retrieve — get real chart configs for rendering
+mgr = await runtime.retrieve("echarts_config_manager")  # Real Python object
+configs = mgr.get_configs()
+
+for config in configs:
+    render_echarts(config)  # Render directly in web UI
+```
+
+### Function Calling
+
+```python
+# Inject functions and variables into runtime
+runtime = IPythonRuntime(
+    variables=[Variable("tasks", [], "User's task list")],
+    functions=[Function(add_task), Function(complete_task)],
+)
+agent = CaveAgent(model, runtime=runtime)
+
+await agent.run("Add 'buy groceries' to my tasks")
+print(await runtime.retrieve("tasks"))  # [{'name': 'buy groceries', 'done': False}]
+```
+
+See [examples/basic_usage.py](examples/basic_usage.py) for a complete example.
+
+### Stateful Object Interactions
+
+```python
+# Inject objects with methods - LLM can call them directly
+runtime = IPythonRuntime(
+    types=[Type(Light), Type(Thermostat)],
+    variables=[
+        Variable("light", Light("Living Room"), "Smart light"),
+        Variable("thermostat", Thermostat(), "Home thermostat"),
+    ],
+)
+agent = CaveAgent(model, runtime=runtime)
+
+await agent.run("Dim the light to 20% and set thermostat to 22°C")
+light = await runtime.retrieve("light")  # Object with updated state
+```
+
+See [examples/object_methods.py](examples/object_methods.py) for a complete example.
+
+### Multi-Agent Coordination
+
+```python
+# Sub-agents with their own runtimes
+cleaner_agent = CaveAgent(model, runtime=IPythonRuntime(variables=[
+    Variable("data", [], "Input"), Variable("cleaned_data", [], "Output"),
+]))
+
+analyzer_agent = CaveAgent(model, runtime=IPythonRuntime(variables=[
+    Variable("data", [], "Input"), Variable("insights", {}, "Output"),
+]))
+
+# Orchestrator controls sub-agents as first-class objects
+orchestrator = CaveAgent(model, runtime=IPythonRuntime(variables=[
+    Variable("raw_data", raw_data, "Raw dataset"),
+    Variable("cleaner", cleaner_agent, "Cleaner agent"),
+    Variable("analyzer", analyzer_agent, "Analyzer agent"),
+]))
+
+# Inject → trigger → retrieve
+await orchestrator.run("Clean raw_data using cleaner, then analyze using analyzer")
+insights = await analyzer.runtime.retrieve("insights")
+```
+
+See [examples/multi_agent.py](examples/multi_agent.py) for a complete example.
+
+### Real-time Streaming
+
+```python
+async for event in agent.stream_events("Analyze this data"):
+    if event.type.value == 'code':
+        print(f"Executing: {event.content}")
+    elif event.type.value == 'execution_output':
+        print(f"Result: {event.content}")
+```
+
+See [examples/stream.py](examples/stream.py) for a complete example.
+
+### Security Rules
+
+```python
+# Block dangerous operations with AST-based validation
+rules = [
+    ImportRule({"os", "subprocess", "sys"}),
+    FunctionRule({"eval", "exec", "open"}),
+    AttributeRule({"__globals__", "__builtins__"}),
+    RegexRule([r"rm\s+-rf", r"sudo\s+"]),
+]
+runtime = IPythonRuntime(security_checker=SecurityChecker(rules))
+```
+
+### More Examples
+
+- [Basic Usage](examples/basic_usage.py): Function calling and object processing
+- [Runtime State](examples/runtime_state.py): State management across interactions
+- [Object Methods](examples/object_methods.py): Class methods and complex objects
+- [Multi-Turn](examples/multi_turn.py): Conversations with state persistence
+- [Multi-Agent](examples/multi_agent.py): Data pipeline with multiple agents
+- [Stream](examples/stream.py): Streaming responses and events
+
+## Agent Skills
+
+CaveAgent implements the [Agent Skills](https://agentskills.io) open standard—a portable format for packaging instructions that agents can discover and use. Originally developed by Anthropic and now supported across the AI ecosystem (Claude, Gemini CLI, Cursor, VS Code, and more), Skills enable agents to acquire domain expertise on-demand.
+
+<p align="center">
+  <img src="assets/skills.png" alt="Agent Skills Architecture" width="85%">
+</p>
+
+### Creating a Skill
+
+A Skill is a directory containing a `SKILL.md` file with YAML frontmatter:
+
+```
+my-skill/
+├── SKILL.md           # Required: Skill definition and instructions
+└── injection.py       # Optional: Functions/variables/types to inject (CaveAgent extension)
+```
+
+**SKILL.md** structure:
+
+```markdown
+---
+name: data-processor
+description: Process and analyze datasets with statistical methods. Use when working with data analysis tasks.
+---
+
+# Data Processing Instructions
+
+## Quick Start
+Use the injected functions to analyze datasets...
+
+## Workflows
+1. Activate the skill to load injected functions
+2. Apply statistical analysis using the provided functions
+3. Return structured results
+```
+
+**Required fields**: `name` (max 64 chars, lowercase with hyphens) and `description` (max 1024 chars)
+
+**Optional fields**: `license`, `compatibility`, `metadata`
+
+### How Skills Load (Progressive Disclosure)
+
+Skills use progressive disclosure to minimize context usage:
+
+| Level | When Loaded | Content |
+|-------|-------------|---------|
+| **Metadata** | At startup | `name` and `description` from YAML frontmatter (~100 tokens) |
+| **Instructions** | When activated | SKILL.md body with guidance (loaded on-demand) |
+
+### Using Skills
+
+Skills are owned by the runtime — pass them into `IPythonRuntime` (or `IPyKernelRuntime`) alongside functions, variables, and types. The agent stays skill-agnostic and gains access to the injected `activate_skill(name)` builtin through the runtime.
+
+```python
+from pathlib import Path
+from cave_agent import CaveAgent
+from cave_agent.runtime import IPythonRuntime, Function, Variable
+from cave_agent.skills import Skill, SkillDiscovery
+
+# Create skills directly
+skill = Skill(
+    name="my-skill",
+    description="A custom skill",
+    body_content="# Instructions\nFollow these steps...",
+    functions=[Function(my_func)],
+    variables=[Variable("config", value={})],
+)
+runtime = IPythonRuntime(skills=[skill])
+agent = CaveAgent(model=model, runtime=runtime)
+
+# Or load from a single SKILL.md file
+skill = SkillDiscovery.from_file(Path("./my-skill/SKILL.md"))
+runtime = IPythonRuntime(skills=[skill])
+agent = CaveAgent(model=model, runtime=runtime)
+
+# Or load an entire directory of skills
+skills = SkillDiscovery.from_directory(Path("./skills"))
+runtime = IPythonRuntime(skills=skills)
+agent = CaveAgent(model=model, runtime=runtime)
+```
+
+When skills are registered on the runtime, the `activate_skill(skill_name)` builtin is automatically available to LLM-generated code. Calling it returns the skill's instructions and injects its exports (functions, variables, types) into the runtime namespace.
+
+Because skills live on the runtime, multiple agents sharing a runtime naturally share its skill set — no duplicate injection, no hidden per-agent state.
+
+### Injection Module (CaveAgent Extension)
+
+CaveAgent extends the Agent Skills standard with `injection.py`—allowing skills to inject functions, variables, and types directly into the runtime when activated:
+
+```python
+from cave_agent.runtime import Function, Variable, Type
+from dataclasses import dataclass
+
+def analyze_data(data: list) -> dict:
+    """Analyze data and return statistics."""
+    return {"mean": sum(data) / len(data), "count": len(data)}
+
+@dataclass
+class AnalysisResult:
+    mean: float
+    count: int
+    status: str
+
+CONFIG = {"threshold": 0.5, "max_items": 1000}
+
+__exports__ = [
+    Function(analyze_data, description="Analyze data statistically"),
+    Variable("CONFIG", value=CONFIG, description="Analysis configuration"),
+    Type(AnalysisResult, description="Result structure"),
+]
+```
+
+When `activate_skill()` is called, these exports are automatically injected into the runtime namespace.
+
+See [examples/skill_data_processor.py](examples/skill_data_processor.py) for a complete example.
+
+<p align="center">
+  <img src="assets/overall.png" alt="CaveAgent Architecture">
+</p>
+
+## Context Compaction
+
+Long conversations inevitably fill up the model's context window. CaveAgent implements a multi-tier compaction strategy inspired by [Claude Code](https://docs.anthropic.com/en/docs/claude-code)'s context management system.
+
+**How it works:**
+
+```
+Token usage exceeds threshold?
+        |
+        v
+  Tier 1: Microcompact (no LLM, instant)
+  Clear old execution results, keep recent 6.
+  Tokens under threshold? → done
+        |
+        v
+  Tier 2: Full Compact (LLM summarization)
+  Summarize older messages, keep recent half.
+  Uses dual-phase prompt: <analysis> (discarded) + <summary> (kept).
+        |
+        v
+  Tier 3: Trim Fallback (last resort)
+  Keep recent half of messages, drop the rest.
+```
+
+The system message (index 0) is always preserved. A **circuit breaker** stops attempting LLM summarization after 3 consecutive failures, falling back to trim to avoid wasting API calls.
+
+```python
+agent = CaveAgent(
+    model,
+    runtime=runtime,
+    context_window=128_000,  # triggers compaction at ~77% usage
+)
+```
+
+## API Resilience
+
+CaveAgent handles transient API failures and output truncation automatically.
+
+**Retry with exponential backoff:** Rate limits (429), server errors (5xx), timeouts (408), and connection errors are retried up to 5 times with exponential backoff (0.5s, 1s, 2s, 4s, 8s) plus jitter. `Retry-After` headers are respected when present.
+
+**Output truncation recovery:** When the model's response is cut off (`finish_reason="length"`), the agent automatically appends the partial response to history and asks the model to continue from where it stopped. This repeats up to 3 times before giving up.
+
+```
+Model response truncated (finish_reason="length")
+        |
+        v
+  Append partial response as AssistantMessage
+  Inject: "Output limit hit. Resume directly, pick up mid-thought."
+  Retry (up to 3 times)
+        |
+        v
+  Model continues from the cutoff point
+```
+
+## Features
+
+- **Code-Based Function Calling**: Leverages LLM's natural coding abilities instead of rigid JSON schemas
+- **Secure Runtime Environment**:
+  - Inject Python objects, variables, and functions as tools
+  - Rule-based security validation prevents dangerous code execution
+  - Flexible security rules: ImportRule, FunctionRule, AttributeRule, RegexRule
+  - Customizable security policies for different use cases
+  - Access execution results and maintain state across interactions
+- **[Agent Skills](https://agentskills.io)**: Implements the open Agent Skills standard for modular, portable instruction packages. CaveAgent extends the standard with runtime injection (`injection.py`).
+- **Multi-Agent Coordination**: Control sub-agents programmatically through runtime injection and retrieval. Shared runtimes enable instant state synchronization.
+- **Context Compaction**: Inspired by [Claude Code](https://docs.anthropic.com/en/docs/claude-code)'s multi-tier context management — microcompact (clear old execution results, no LLM) → full compact (LLM summarization with dual-phase analysis+summary prompt) → trim fallback, with circuit breaker protection against cascading failures
+- **API Resilience**: Automatic retry with exponential backoff + jitter for rate limits (429), server errors (5xx), and connection failures. Output truncation recovery automatically continues when the model's response is cut off by `max_tokens`
+- **Streaming & Async**: Real-time event streaming and full async/await support for optimal performance
+- **Execution Control**: Configurable step limits and error handling to prevent infinite loops
+- **Flexible LLM Support**: Works with any LLM provider via OpenAI-compatible APIs or LiteLLM
+- **Type Injection**: Expose class schemas for type-aware LLM code generation
+
+
+## Configuration
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| model | Model | required | LLM model instance (OpenAIServerModel or LiteLLMModel) |
+| runtime | Runtime | None | `IPythonRuntime` (default) or `IPyKernelRuntime` (process-isolated). Skills are now passed to the runtime — e.g. `IPythonRuntime(skills=[...])` |
+| max_steps | int | 10 | Maximum execution steps per run |
+| context_window | int | 128000 | Model context window size in tokens. Controls when context compaction triggers |
+| max_exec_output | int | 5000 | Max characters in execution output |
+| max_exec_timeout | float \| None | None | Max seconds per code execution. LLM is guided to use timeouts in network/DB calls |
+| display | bool | True | Render events to terminal via Rich (Claude Code-style UI) |
+| instructions | str | default | User instructions defining agent role and behavior |
+| system_instructions | str | default | System-level execution rules and examples |
+| system_prompt_template | str | default | Custom system prompt template |
+| python_block_identifier | str | python | Code block language identifier |
+| messages | List[Message] | None | Initial message history |
+
+## LLM Provider Support
+
+CaveAgent supports multiple LLM providers:
+
+### OpenAI-Compatible Models
+```python
+from cave_agent.models import OpenAIServerModel
+
+model = OpenAIServerModel(
+    model_id="gpt-4",
+    api_key="your-api-key",
+    base_url="https://api.openai.com/v1"  # or your custom endpoint
+)
+```
+
+### LiteLLM Models (Recommended)
+LiteLLM provides unified access to hundreds of LLM providers:
+
+```python
+from cave_agent.models import LiteLLMModel
+
+# OpenAI
+model = LiteLLMModel(
+    model_id="gpt-4",
+    api_key="your-api-key",
+    custom_llm_provider='openai'
+)
+
+# Anthropic Claude
+model = LiteLLMModel(
+    model_id="claude-3-sonnet-20240229",
+    api_key="your-api-key",
+    custom_llm_provider='anthropic' 
+)
+
+# Google Gemini
+model = LiteLLMModel(
+    model_id="gemini/gemini-pro",
+    api_key="your-api-key"
+)
+```
+
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a PR.
+For more details, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+MIT License
