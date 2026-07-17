@@ -15,7 +15,7 @@
   <a href="https://arxiv.org/abs/2601.01569"><img src="https://img.shields.io/badge/arXiv-Paper-red?style=flat-square&logo=arxiv" alt="arXiv Paper"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12+-blue?style=flat-square" alt="Python 3.12+"></a>
-  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/badge/PyPI-0.7.3-blue?style=flat-square" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/cave-agent"><img src="https://img.shields.io/pypi/v/cave-agent?style=flat-square&color=blue&label=PyPI" alt="PyPI version"></a>
 </p>
 
 <p align="center">
