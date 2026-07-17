@@ -12,11 +12,11 @@ import asyncio
 import os
 
 from cave_agent import CaveAgent
-from cave_agent.models import OpenAIServerModel
+from cave_agent.models import OpenAIModel
 from cave_agent.runtime import IPythonRuntime, Function, Variable
 
 
-model = OpenAIServerModel(
+model = OpenAIModel(
     model_id=os.getenv("LLM_MODEL_ID"),
     api_key=os.getenv("LLM_API_KEY"),
     base_url=os.getenv("LLM_BASE_URL"),
