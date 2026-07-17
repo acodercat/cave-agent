@@ -51,9 +51,16 @@ class IPythonExecutor:
     """
 
     def __init__(self, security_checker: Optional[SecurityChecker] = None, error_feedback_mode: ErrorFeedbackMode = ErrorFeedbackMode.PLAIN):
-        """Initialize IPython shell for code execution."""
+        """Initialize IPython shell for code execution.
+
+        Constructs an independent ``InteractiveShell`` rather than the
+        process-wide singleton (``InteractiveShell.instance()``). Using the
+        singleton would make every runtime in the process share one namespace
+        and silently ignore the config of all but the first — breaking
+        multi-runtime / multi-agent isolation.
+        """
         ipython_config = self.create_ipython_config(error_feedback_mode=error_feedback_mode)
-        self._shell = InteractiveShell.instance(config=ipython_config)
+        self._shell = InteractiveShell(config=ipython_config)
         self._security_checker = security_checker
 
     def inject_into_namespace(self, name: str, value: Any):

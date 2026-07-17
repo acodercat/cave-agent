@@ -11,6 +11,8 @@ import random
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
+from .errors import classify_provider_error, is_billing_exhausted
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -46,11 +48,39 @@ async def with_retry(
     raise RuntimeError("Unreachable")
 
 
+async def with_retry_typed(
+    operation: Callable[[], Awaitable[T]],
+    max_retries: int = MAX_RETRIES,
+) -> T:
+    """``with_retry`` that translates a surviving raw provider error into a
+    typed :class:`~cave_agent.models.errors.ModelError`.
+
+    A context-length overflow becomes ``PromptTooLongError`` (so the agent can
+    recover by compaction) and a billing exhaustion becomes
+    ``ProviderBillingError``; anything else propagates unchanged.
+    """
+    try:
+        return await with_retry(operation, max_retries=max_retries)
+    except Exception as error:
+        typed = classify_provider_error(error)
+        if typed is error:
+            raise
+        raise typed from error
+
+
 def is_retryable(error: Exception) -> bool:
     """Check whether an API error is worth retrying."""
+    # Billing exhaustion can ride a retryable status (OpenAI signals
+    # ``insufficient_quota`` on a 429), but a top-up — not time — fixes it,
+    # so never burn retry budget on it.
+    if is_billing_exhausted(error):
+        return False
     status = getattr(error, "status_code", None) or getattr(error, "status", None)
-    if status and status in RETRYABLE_STATUS_CODES:
-        return True
+    if isinstance(status, int):
+        # A definite HTTP status is authoritative: retry 429/5xx, but do NOT
+        # fall through to the message heuristic for e.g. a 400 whose text
+        # merely mentions "timeout" (an invalid-parameter error, not transient).
+        return status in RETRYABLE_STATUS_CODES
     if isinstance(error, (ConnectionError, TimeoutError)):
         return True
     message = str(error).lower()

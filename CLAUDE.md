@@ -25,7 +25,7 @@ pytest tests/test_ipython_runtime.py::test_simple_execution -v
 python -m build
 ```
 
-**Test environment variables**: Tests use a real LLM via `LLM_MODEL_ID`, `LLM_API_KEY`, and `LLM_BASE_URL` (see `tests/conftest.py`). All async tests use `@pytest.mark.asyncio`.
+**Test environment variables**: Most tests are integration tests that hit a real LLM via `LLM_MODEL_ID`, `LLM_API_KEY`, and `LLM_BASE_URL` (see `tests/conftest.py`'s `model` fixture using `OpenAIModel`). Without those env vars, any test taking the `model` fixture will fail at fixture setup. Pure-unit files (e.g. `test_security_checker.py`, `test_streaming_text_parser.py`, `test_type_schema_extractor.py`) run offline. All async tests use `@pytest.mark.asyncio`.
 
 ## Architecture
 
@@ -37,18 +37,18 @@ The agent supports two modes: `run()` (returns final `AgentResponse`) and `strea
 
 ### Runtime System (`runtime/`)
 
-`Runtime` (ABC) provides `inject_function/variable/type`, `execute(code)`, and `retrieve(name)`. It also generates `describe_functions/variables/types()` strings that go into the system prompt so the LLM knows what's available.
+`Runtime` (base class in `runtime/runtime.py`) owns the LLM-facing `functions`, `variables`, and `types`. It provides `inject_function/variable/type`, `execute(code)`, and `retrieve(name)`, plus `describe_functions/variables/types()` strings that get slotted into the system prompt so the LLM knows what's available. Skills live on the `CaveAgent`, not the runtime (see Skills System below).
 
 Two implementations:
-- **IPythonRuntime** (default) - In-process IPython shell. Direct object access, zero serialization, but crashes affect the host process.
+- **IPythonRuntime** (default) - In-process IPython shell. Direct object access, zero serialization, but crashes affect the host process. Each runtime constructs an **independent** `InteractiveShell` (not the `.instance()` singleton), so separate runtimes/agents in one process have isolated namespaces.
 - **IPyKernelRuntime** - Separate Jupyter kernel subprocess. Objects serialized via `dill`. Crash-isolated, supports interrupt/reset. Requires `cave-agent[ipykernel]`.
 
 **Primitives** (`primitives.py`): `Variable`, `Function`, `Type` wrap values for injection. `Type` uses `TypeSchemaExtractor` to auto-generate schemas from Pydantic models, dataclasses, Enums, and regular classes.
 
 ### Model Abstraction (`models/`)
 
-`Model` ABC with `call()` and `stream()` methods. Two implementations:
-- `OpenAIServerModel` - OpenAI API and compatible endpoints
+`Model` ABC (in `base.py`) with `call()` and `stream()` methods. Two implementations:
+- `OpenAIModel` - OpenAI API and compatible endpoints
 - `LiteLLMModel` - 100+ providers via LiteLLM
 
 Both are optional dependencies (`cave-agent[openai]` or `cave-agent[litellm]`). The models are imported lazily to avoid requiring both.
@@ -56,6 +56,8 @@ Both are optional dependencies (`cave-agent[openai]` or `cave-agent[litellm]`). 
 ### Security (`security/`)
 
 AST-based `SecurityChecker` validates code before execution using rules: `ImportRule`, `FunctionRule`, `AttributeRule`, `RegexRule`. Applied in the executor layer, violations short-circuit execution and surface as `SECURITY_ERROR` events.
+
+This is **advisory hardening, not a sandbox** — static AST analysis can't catch dynamic reflection or C-extension escapes. Untrusted code needs a real isolation boundary (container + seccomp/gVisor + OS limits) with `IPyKernelRuntime`. Rule specifics worth knowing: `ImportRule` matches on the top-level package (forbidding `os` also blocks `import os.path`), `FunctionRule` flags both calls and bare-name references (catches `f = open`), and `RegexRule` scans the unparsed source of the whole module (not just top-level expressions).
 
 ### Skills System (`skills/`)
 

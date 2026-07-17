@@ -10,7 +10,7 @@ Claude Code-style UI:
 import time
 from typing import AsyncGenerator
 
-from rich.console import Console, Group
+from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.syntax import Syntax
@@ -29,27 +29,27 @@ _MAX_DISPLAY_LINES = 12
 
 async def with_display(
     events: AsyncGenerator[Event, None],
-    context=None,
+    state=None,
 ) -> AsyncGenerator[Event, None]:
     """Wrap an async event stream, printing each event and yielding it through.
 
-    *context* is an optional execution context providing token usage for
-    the summary line.  Passed internally by ``CaveAgent.stream_events()``.
+    *state* is an optional run state providing token usage for the summary
+    line. Passed internally by ``CaveAgent.stream_events()``.
     """
     display = _DisplayState()
     async for event in events:
         display.handle(event)
         yield event
-    token_usage = getattr(context, "token_usage", None) if context else None
+    token_usage = getattr(state, "token_usage", None) if state else None
     display.finalize(token_usage)
 
 
 async def render_events(
     events: AsyncGenerator[Event, None],
-    context=None,
+    state=None,
 ) -> None:
     """Consume an async event stream, printing each event to the terminal."""
-    async for _ in with_display(events, context):
+    async for _ in with_display(events, state):
         pass
 
 
@@ -72,12 +72,20 @@ class _DisplayState:
 
     def __init__(self):
         self._live: Live | None = None
-        self._mode: str = ""  # "text" or "code"
+        self._mode: str = ""  # "thinking", "text", or "code"
         self._text_buffer: list[str] = []
+        self._thinking_buffer: list[str] = []
+        # A non-transient (frozen) live block leaves the cursor mid-line; when set,
+        # ``_stop_live`` ends that line so the next header/text starts cleanly.
+        self._live_needs_break: bool = False
         self._start_time: float = time.monotonic()
 
     def handle(self, event: Event) -> None:
         match event.type:
+            case EventType.THINKING_CHUNK:
+                self._handle_thinking_chunk(event)
+            case EventType.THINKING:
+                self._handle_thinking_seal()
             case EventType.TEXT:
                 self._handle_text(event)
             case EventType.CODE:
@@ -93,11 +101,51 @@ class _DisplayState:
             case EventType.FINAL_RESPONSE:
                 self._handle_final()
             case EventType.MAX_STEPS_REACHED:
-                self._handle_max_steps(event)
+                self._handle_terminal_notice(event)
+            case EventType.MAX_RUN_TIME_REACHED:
+                self._handle_terminal_notice(event)
             case EventType.COMPACTING:
                 self._handle_compacting()
             case EventType.COMPACTED:
                 self._handle_compacted(event)
+
+    def _handle_thinking_chunk(self, event: Event) -> None:
+        """Render a reasoning delta live in a muted style, above the answer.
+
+        Reasoning models stream their reasoning first; each ``THINKING_CHUNK``
+        appends here and refreshes the dim block, which is sealed (frozen) by
+        ``THINKING`` when the first answer token arrives.
+        """
+        if self._mode in ("text", "code"):
+            self._stop_live()
+
+        self._thinking_buffer.append(event.content)
+        text = "".join(self._thinking_buffer)
+
+        if self._mode != "thinking":
+            console.print()
+            console.print(Text.assemble(("✻ ", "magenta"), ("Thinking", "bold dim")))
+            self._mode = "thinking"
+            self._live = Live(
+                Text(text, style="dim italic"),
+                console=console,
+                refresh_per_second=8,
+                transient=False,
+            )
+            self._live.start()
+            self._live_needs_break = True
+        else:
+            self._live.update(Text(text, style="dim italic"))
+
+    def _handle_thinking_seal(self) -> None:
+        """Freeze the reasoning block so the answer text renders fresh below.
+
+        The ``THINKING`` event carries the full trace, but it was already
+        streamed chunk-by-chunk, so there is nothing more to print — ``_stop_live``
+        closes the frozen block and ends its line.
+        """
+        self._stop_live()
+        self._thinking_buffer.clear()
 
     def _handle_text(self, event: Event) -> None:
         if self._mode == "code":
@@ -116,6 +164,7 @@ class _DisplayState:
                 transient=False,
             )
             self._live.start()
+            self._live_needs_break = True
         else:
             self._live.update(Markdown(text))
 
@@ -194,7 +243,8 @@ class _DisplayState:
             console.print(Text(f"{_RESULT_PREFIX}Compacted {event.content} messages", style="dim"))
         console.print()
 
-    def _handle_max_steps(self, event: Event) -> None:
+    def _handle_terminal_notice(self, event: Event) -> None:
+        """Render a run-ending notice (max steps / max execution time reached)."""
         self._stop_live()
         console.print()
         console.print(Text(f"{_RESULT_PREFIX}{event.content}", style="bold yellow"))
@@ -222,4 +272,9 @@ class _DisplayState:
         if self._live:
             self._live.stop()
             self._live = None
+            if self._live_needs_break:
+                # Terminate the frozen block's last line so the following
+                # header/text doesn't run onto it.
+                console.print()
+        self._live_needs_break = False
         self._mode = ""

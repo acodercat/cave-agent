@@ -15,12 +15,12 @@ from rich.text import Text
 from rich.rule import Rule
 
 from cave_agent import CaveAgent
-from cave_agent.models.openai import OpenAIServerModel
+from cave_agent.models.openai import OpenAIModel
 from cave_agent.runtime import IPythonRuntime, Variable
 
 console = Console()
 
-model = OpenAIServerModel(
+model = OpenAIModel(
     model_id=os.getenv("LLM_MODEL_ID"),
     api_key=os.getenv("LLM_API_KEY"),
     base_url=os.getenv("LLM_BASE_URL")

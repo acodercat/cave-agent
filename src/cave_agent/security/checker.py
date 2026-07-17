@@ -8,11 +8,16 @@ logger = logging.getLogger(__name__)
 
 
 class SecurityChecker:
-    """Main security checker for Python code analysis.
+    """AST-based static screen for LLM-generated code.
 
-    Provides comprehensive security analysis using AST parsing to detect
-    security violations before code execution. Supports multiple
-    security rules.
+    Applies rules to the parsed AST to catch obviously dangerous patterns
+    (forbidden imports, calls, attribute access, regex matches) before code
+    runs. This is **advisory hardening, not a sandbox**: static analysis
+    cannot catch every obfuscation or indirection (dynamic attribute access,
+    reflection, C-extension escapes, etc.). For untrusted code, run inside a
+    real isolation boundary — a container with seccomp/gVisor and OS resource
+    limits, or at minimum the process-isolated ``IPyKernelRuntime`` — and
+    treat this checker as defense-in-depth on top of that.
 
     Example:
         >>> from cave_agent.security import SecurityChecker, ImportRule, FunctionRule, AttributeRule, RegexRule
@@ -68,6 +73,7 @@ class SecurityChecker:
             violations.append(SecurityViolation(
                 message="Parse error: Code cannot be empty",
             ))
+            return violations
 
         try:
             # Parse code into AST

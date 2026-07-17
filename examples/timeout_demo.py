@@ -12,12 +12,12 @@ from rich.rule import Rule
 
 from cave_agent import CaveAgent, Function, IPythonRuntime
 from cave_agent.runtime import IPyKernelRuntime
-from cave_agent.models.openai import OpenAIServerModel
+from cave_agent.models.openai import OpenAIModel
 from cave_agent.display import render_user_prompt
 
 console = Console()
 
-model = OpenAIServerModel(
+model = OpenAIModel(
     model_id=os.getenv("LLM_MODEL_ID", "qwen3.5-397b-a17b"),
     api_key=os.getenv("LLM_API_KEY", "sk-8898a87b8e7b4e399d6fc5ee804c4666"),
     base_url=os.getenv("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),

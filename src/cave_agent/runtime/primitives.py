@@ -66,12 +66,17 @@ class Function:
         """
         self.func = func
         self.description = description
-        self.name = func.__name__
+        self.name = getattr(func, "__name__", func.__class__.__name__)
         self.is_async = inspect.iscoroutinefunction(func)
 
         # Include 'async' prefix for async functions so LLM knows to use await
         prefix = "async " if self.is_async else ""
-        self.signature = f"{prefix}{self.name}{inspect.signature(func)}"
+        try:
+            sig = str(inspect.signature(func))
+        except (ValueError, TypeError):
+            # Some C builtins / callables expose no introspectable signature.
+            sig = "(...)"
+        self.signature = f"{prefix}{self.name}{sig}"
         self.doc: Optional[str] = None
 
         if include_doc and hasattr(func, "__doc__") and func.__doc__:

@@ -262,12 +262,20 @@ See [examples/multi_agent.py](examples/multi_agent.py) for a complete example.
 ### Real-time Streaming
 
 ```python
+from cave_agent.types import EventType
+
 async for event in agent.stream_events("Analyze this data"):
-    if event.type.value == 'code':
-        print(f"Executing: {event.content}")
-    elif event.type.value == 'execution_output':
+    if event.type == EventType.THINKING_CHUNK:    # reasoning streams live (o1/o3, DeepSeek-R1, …)
+        print(event.content, end="")
+    elif event.type == EventType.TEXT:
+        print(event.content, end="")
+    elif event.type == EventType.CODE:
+        print(f"\nExecuting: {event.content}")
+    elif event.type == EventType.EXECUTION_OUTPUT:
         print(f"Result: {event.content}")
 ```
+
+**Reasoning models.** When the model exposes a reasoning trace (OpenAI `o1`/`o3`, DeepSeek-R1, Qwen/Moonshot reasoning, …), CaveAgent streams it **live** as `THINKING_CHUNK` events (before the answer), then seals the segment with one `THINKING` event carrying the full trace. Reasoning is captured, kept out of the code-block parser, and never sent back on the wire.
 
 See [examples/stream.py](examples/stream.py) for a complete example.
 
@@ -276,13 +284,19 @@ See [examples/stream.py](examples/stream.py) for a complete example.
 ```python
 # Block dangerous operations with AST-based validation
 rules = [
-    ImportRule({"os", "subprocess", "sys"}),
-    FunctionRule({"eval", "exec", "open"}),
+    ImportRule({"os", "subprocess", "sys"}),      # also blocks os.path, subprocess.run, ...
+    FunctionRule({"eval", "exec", "open"}),        # also catches aliasing: f = open; f(...)
     AttributeRule({"__globals__", "__builtins__"}),
-    RegexRule([r"rm\s+-rf", r"sudo\s+"]),
+    RegexRule(r"rm\s+-rf|sudo\s+", "Block shell escapes"),
 ]
 runtime = IPythonRuntime(security_checker=SecurityChecker(rules))
 ```
+
+> ⚠️ **`SecurityChecker` is advisory hardening, not a sandbox.** Static AST
+> analysis cannot catch every obfuscation (dynamic reflection, C-extension
+> escapes, etc.). For genuinely untrusted code, run inside a real isolation
+> boundary — a container with seccomp/gVisor and OS resource limits — and use
+> the process-isolated `IPyKernelRuntime`. Treat these rules as defense-in-depth.
 
 ### More Examples
 
@@ -433,6 +447,11 @@ Token usage exceeds threshold?
 
 The system message (index 0) is always preserved. A **circuit breaker** stops attempting LLM summarization after 3 consecutive failures, falling back to trim to avoid wasting API calls.
 
+Two refinements keep it accurate before an API token count is available:
+
+- **CJK-aware estimation.** Chinese / Japanese / Korean text tokenizes ~2× denser than the `chars/4` heuristic, so estimation switches to a per-class split once CJK density crosses a threshold — compaction then triggers at the right time for non-English conversations, not too late.
+- **Emergency recovery.** If a request still overflows the window despite proactive compaction, an aggressive path (keep the most recent quarter, summarize the rest) runs and the call is retried once — see [API Resilience](#api-resilience).
+
 ```python
 agent = CaveAgent(
     model,
@@ -443,41 +462,31 @@ agent = CaveAgent(
 
 ## API Resilience
 
-CaveAgent handles transient API failures and output truncation automatically.
+CaveAgent is built to survive transient failures, provider quirks, and context overflow without dropping the run.
 
-**Retry with exponential backoff:** Rate limits (429), server errors (5xx), timeouts (408), and connection errors are retried up to 5 times with exponential backoff (0.5s, 1s, 2s, 4s, 8s) plus jitter. `Retry-After` headers are respected when present.
+**Typed error handling.** Provider SDK errors are classified into a provider-agnostic hierarchy so each is handled correctly instead of blindly retried:
 
-**Output truncation recovery:** When the model's response is cut off (`finish_reason="length"`), the agent automatically appends the partial response to history and asks the model to continue from where it stopped. This repeats up to 3 times before giving up.
+- **Transient** (429 / 5xx / 408 / connection errors) → retried up to 5 times with exponential backoff + jitter (0.5s, 1s, 2s, 4s, 8s); `Retry-After` is honored when present.
+- **Billing exhausted** (`insufficient_quota`, credit balance, HTTP 402, …) → **never retried** — a top-up, not time, is what fixes it.
+- **Context too long** → routed to compaction, not retry (below).
 
-```
-Model response truncated (finish_reason="length")
-        |
-        v
-  Append partial response as AssistantMessage
-  Inject: "Output limit hit. Resume directly, pick up mid-thought."
-  Retry (up to 3 times)
-        |
-        v
-  Model continues from the cutoff point
-```
+**Reactive context-overflow recovery.** If the model still rejects a prompt as too long (the local estimate under-counted), the agent aggressively compacts — keeps the most recent quarter, summarizes the rest — and retries the call **once**, instead of failing.
+
+**Streaming liveness.** A sliding idle-timeout watchdog (`stream_idle_timeout`, default 120s) abandons a stalled stream — catching stalls transport timeouts miss (proxy keep-alives / provider `ping`s keep the socket readable while no token arrives). A first-chunk connect failure is retried before any content is emitted; a mid-stream drop salvages what streamed instead of crashing the run.
+
+**Output truncation recovery.** When the model's response is cut off (`finish_reason="length"`), the agent appends the partial response and asks the model to continue from the cutoff — up to 3 times.
+
+**Resource lifecycle.** Every model implements `aclose()` (and works as an `async with` context manager) to release its HTTP connection pool cleanly.
 
 ## Features
 
-- **Code-Based Function Calling**: Leverages LLM's natural coding abilities instead of rigid JSON schemas
-- **Secure Runtime Environment**:
-  - Inject Python objects, variables, and functions as tools
-  - Rule-based security validation prevents dangerous code execution
-  - Flexible security rules: ImportRule, FunctionRule, AttributeRule, RegexRule
-  - Customizable security policies for different use cases
-  - Access execution results and maintain state across interactions
-- **[Agent Skills](https://agentskills.io)**: Implements the open Agent Skills standard for modular, portable instruction packages. CaveAgent extends the standard with runtime injection (`injection.py`).
-- **Multi-Agent Coordination**: Control sub-agents programmatically through runtime injection and retrieval. Shared runtimes enable instant state synchronization.
-- **Context Compaction**: Inspired by [Claude Code](https://docs.anthropic.com/en/docs/claude-code)'s multi-tier context management — microcompact (clear old execution results, no LLM) → full compact (LLM summarization with dual-phase analysis+summary prompt) → trim fallback, with circuit breaker protection against cascading failures
-- **API Resilience**: Automatic retry with exponential backoff + jitter for rate limits (429), server errors (5xx), and connection failures. Output truncation recovery automatically continues when the model's response is cut off by `max_tokens`
-- **Streaming & Async**: Real-time event streaming and full async/await support for optimal performance
-- **Execution Control**: Configurable step limits and error handling to prevent infinite loops
-- **Flexible LLM Support**: Works with any LLM provider via OpenAI-compatible APIs or LiteLLM
-- **Type Injection**: Expose class schemas for type-aware LLM code generation
+- **Code-based function calling** — the LLM writes and runs Python against injected objects, not rigid JSON tool schemas
+- **Stateful runtime** — inject/retrieve real Python objects (DataFrames, connections, class instances) with state persisting across turns; expose class schemas for type-aware code generation
+- **Two runtimes** — in-process `IPythonRuntime` or crash-isolated `IPyKernelRuntime`
+- **Reasoning models** — streams `o1` / DeepSeek-R1 reasoning live as `THINKING_CHUNK` events
+- **Execution control** — step limits, a wall-clock run budget, and per-execution / stream-idle timeouts
+
+Skills, compaction, resilience, security, multi-agent, and provider support each have a dedicated section above.
 
 
 ## Awesome Blogs
@@ -493,13 +502,15 @@ We thank these community to post our work.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| model | Model | required | LLM model instance (OpenAIServerModel or LiteLLMModel) |
+| model | Model | required | LLM model instance (OpenAIModel or LiteLLMModel) |
 | runtime | Runtime | None | `IPythonRuntime` (default) or `IPyKernelRuntime` (process-isolated) |
 | skills | List[Skill] | None | List of skill objects to load |
 | max_steps | int | 10 | Maximum execution steps per run |
+| max_run_time | float \| None | None | Wall-clock budget (seconds) for the whole run, checked at turn boundaries. `None` disables |
 | context_window | int | 128000 | Model context window size in tokens. Controls when context compaction triggers |
 | max_exec_output | int | 5000 | Max characters in execution output |
 | max_exec_timeout | float \| None | None | Max seconds per code execution. LLM is guided to use timeouts in network/DB calls |
+| stream_idle_timeout | float \| None | 120.0 | Max seconds between two stream chunks before the model call is abandoned (catches stalls transport timeouts miss). `None` disables |
 | display | bool | True | Render events to terminal via Rich (Claude Code-style UI) |
 | instructions | str | default | User instructions defining agent role and behavior |
 | system_instructions | str | default | System-level execution rules and examples |
@@ -513,13 +524,19 @@ CaveAgent supports multiple LLM providers:
 
 ### OpenAI-Compatible Models
 ```python
-from cave_agent.models import OpenAIServerModel
+from cave_agent.models import OpenAIModel
 
-model = OpenAIServerModel(
+model = OpenAIModel(
     model_id="gpt-4",
     api_key="your-api-key",
     base_url="https://api.openai.com/v1"  # or your custom endpoint
 )
+
+# Release the HTTP connection pool when tearing down a long-lived model,
+# or use it as an async context manager:
+await model.aclose()
+# async with OpenAIModel(model_id="gpt-4", api_key="...") as model:
+#     ...
 ```
 
 ### LiteLLM Models (Recommended)

@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, Any
 
-from .base import Model, ModelResponse, StreamResponse, TokenUsage
-from .retry import with_retry
+from .base import Model, ModelResponse, StreamResponse
+from .retry import with_retry_typed
 
 
 class LiteLLMModel(Model):
@@ -56,7 +56,7 @@ class LiteLLMModel(Model):
         import litellm
 
         params = self._prepare_params(messages)
-        response = await with_retry(
+        response = await with_retry_typed(
             lambda: litellm.acompletion(**params, stream=False)
         )
 
@@ -66,6 +66,7 @@ class LiteLLMModel(Model):
             content=content,
             token_usage=self._extract_token_usage(response),
             finish_reason=finish_reason,
+            thinking=self._extract_thinking(response),
         )
 
     def stream(self, messages: List[Dict[str, str]]) -> StreamResponse:
@@ -74,29 +75,16 @@ class LiteLLMModel(Model):
 
 
 class _LiteLLMStreamResponse(StreamResponse):
-    """Async iterator over LiteLLM streaming chunks."""
+    """LiteLLM streaming response — iteration, usage capture, connect-retry, and
+    close are all handled by :class:`StreamResponse`; this only opens the stream."""
 
     def __init__(self, model: LiteLLMModel, messages: List[Dict[str, str]]):
         super().__init__()
         self._model = model
         self._messages = messages
-        self._iterator = None
 
-    def __aiter__(self):
-        return self
+    async def _open_stream(self):
+        import litellm
 
-    async def __anext__(self) -> str:
-        if self._iterator is None:
-            import litellm
-
-            params = self._model._prepare_params(self._messages)
-            response = await with_retry(
-                lambda: litellm.acompletion(**params, stream=True)
-            )
-            self._iterator = response.__aiter__()
-
-        while True:
-            chunk = await self._iterator.__anext__()
-            text = self._process_stream_chunk(chunk)
-            if text is not None:
-                return text
+        params = self._model._prepare_params(self._messages)
+        return await litellm.acompletion(**params, stream=True)

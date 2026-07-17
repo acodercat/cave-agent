@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 MAX_CONSECUTIVE_FAILURES = 3
 KEEP_RECENT_EXECUTION_RESULTS = 6
 MIN_KEEP_MESSAGES = 4
+# Reactive recovery keeps only the most recent quarter (vs the half a normal
+# full compact keeps) — the request already overflowed, so it drops more.
+KEEP_RECENT_FRACTION_AGGRESSIVE = 4
 
 
 def microcompact(messages: list) -> list:
@@ -86,6 +89,29 @@ def trim_fallback(messages: list) -> list:
     keep_count = max(len(messages) // 2, MIN_KEEP_MESSAGES)
     trimmed = messages[-keep_count:]
     return _strip_leading_execution_results(trimmed)
+
+
+async def aggressive_recover(messages: list, model: Model) -> list:
+    """Emergency recovery for a reactive context overflow (API said the prompt
+    is too long).
+
+    Microcompacts, then summarizes the older three-quarters, keeping only the
+    most recent quarter (a normal ``full_compact`` keeps half). No circuit
+    breaker — this is the last resort before the request fails outright; a
+    failed summarization falls back to a hard trim so the retry can still go.
+    """
+    messages = microcompact(messages)
+    keep_count = max(len(messages) // KEEP_RECENT_FRACTION_AGGRESSIVE, MIN_KEEP_MESSAGES)
+    to_summarize = messages[:-keep_count]
+    to_keep = _strip_leading_execution_results(messages[-keep_count:])
+    if not to_summarize:
+        return to_keep
+    try:
+        summary = await _generate_summary(to_summarize, model)
+    except Exception:
+        logger.warning("Emergency summarization failed — falling back to trim", exc_info=True)
+        return trim_fallback(messages)
+    return _build_summary_result(summary, to_keep)
 
 
 def _build_summary_result(summary: str, to_keep: list) -> list:

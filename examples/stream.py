@@ -1,5 +1,6 @@
-from cave_agent import CaveAgent, LogLevel, Logger
-from cave_agent.models import OpenAIServerModel
+from cave_agent import CaveAgent
+from cave_agent.logger import LogLevel, Logger
+from cave_agent.models import OpenAIModel
 from cave_agent.runtime import IPythonRuntime, Variable, Type
 import os
 import asyncio
@@ -8,7 +9,7 @@ from rich.console import Console
 from rich.text import Text
 
 # Initialize LLM engine
-model = OpenAIServerModel(
+model = OpenAIModel(
     model_id=os.getenv("LLM_MODEL_ID"),
     api_key=os.getenv("LLM_API_KEY"),
     base_url=os.getenv("LLM_BASE_URL")
@@ -53,7 +54,7 @@ async def main():
     agent = CaveAgent(
         model,
         runtime=runtime,
-        log_level=LogLevel.ERROR
+        display=False,  # this example renders events itself via Logger below
     )
     
     logger = Logger(LogLevel.DEBUG)

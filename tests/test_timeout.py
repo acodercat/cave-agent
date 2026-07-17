@@ -1,11 +1,12 @@
 """Tests for execution timeout — no real LLM or runtime needed."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
-from cave_agent.agent import CaveAgent, _ExecutionContext
+from cave_agent.agent import CaveAgent, _RunState
+from cave_agent.models import StreamResponse, StreamDelta
 from cave_agent.types import EventType
 from cave_agent.runtime.executor import ExecutionResult
 
@@ -51,8 +52,9 @@ class MockModel:
         return MockStreamResponse(self._code)
 
 
-class MockStreamResponse:
+class MockStreamResponse(StreamResponse):
     def __init__(self, code: str):
+        super().__init__()
         self._chunks = list(f"```python\n{code}\n```")
         self._index = 0
         self.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
@@ -60,12 +62,12 @@ class MockStreamResponse:
     def __aiter__(self):
         return self
 
-    async def __anext__(self) -> str:
+    async def __anext__(self) -> StreamDelta:
         if self._index >= len(self._chunks):
             raise StopAsyncIteration
         chunk = self._chunks[self._index]
         self._index += 1
-        return chunk
+        return StreamDelta(content=chunk)
 
 
 def _make_agent(runtime_delay: float, timeout: float | None) -> CaveAgent:
@@ -91,7 +93,7 @@ def _make_agent(runtime_delay: float, timeout: float | None) -> CaveAgent:
 async def test_timeout_triggers():
     """Execution slower than timeout should return timeout error."""
     agent = _make_agent(runtime_delay=3.0, timeout=1.0)
-    context = _ExecutionContext(max_steps=5)
+    context = _RunState(max_steps=5)
 
     result = await agent._execute_code("slow code", context)
 
@@ -103,7 +105,7 @@ async def test_timeout_triggers():
 async def test_no_timeout_when_fast():
     """Execution faster than timeout should succeed normally."""
     agent = _make_agent(runtime_delay=0.1, timeout=5.0)
-    context = _ExecutionContext(max_steps=5)
+    context = _RunState(max_steps=5)
 
     result = await agent._execute_code("fast code", context)
 
@@ -115,7 +117,7 @@ async def test_no_timeout_when_fast():
 async def test_no_timeout_when_none():
     """No timeout configured should execute without limit."""
     agent = _make_agent(runtime_delay=0.1, timeout=None)
-    context = _ExecutionContext(max_steps=5)
+    context = _RunState(max_steps=5)
 
     result = await agent._execute_code("any code", context)
 
@@ -126,7 +128,7 @@ async def test_no_timeout_when_none():
 async def test_interrupt_called_on_timeout():
     """Runtime.interrupt() should be called when execution times out."""
     agent = _make_agent(runtime_delay=3.0, timeout=1.0)
-    context = _ExecutionContext(max_steps=5)
+    context = _RunState(max_steps=5)
 
     await agent._execute_code("slow code", context)
 
@@ -137,7 +139,7 @@ async def test_interrupt_called_on_timeout():
 async def test_interrupt_not_called_on_success():
     """Runtime.interrupt() should not be called when execution succeeds."""
     agent = _make_agent(runtime_delay=0.1, timeout=5.0)
-    context = _ExecutionContext(max_steps=5)
+    context = _RunState(max_steps=5)
 
     await agent._execute_code("fast code", context)
 
@@ -148,7 +150,7 @@ async def test_interrupt_not_called_on_success():
 async def test_timeout_message_includes_duration():
     """Timeout error message should include the configured timeout value."""
     agent = _make_agent(runtime_delay=3.0, timeout=2.0)
-    context = _ExecutionContext(max_steps=5)
+    context = _RunState(max_steps=5)
 
     result = await agent._execute_code("slow code", context)
 
@@ -159,7 +161,7 @@ async def test_timeout_message_includes_duration():
 async def test_timeout_prompt_guides_llm():
     """Timeout next_prompt should tell LLM to simplify."""
     agent = _make_agent(runtime_delay=3.0, timeout=1.0)
-    context = _ExecutionContext(max_steps=5)
+    context = _RunState(max_steps=5)
 
     result = await agent._execute_code("slow code", context)
 
