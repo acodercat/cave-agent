@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import AsyncGenerator
 import logging
 
-from .models import Model, TokenUsage
+from .models import Model, ModelResponse, TokenUsage, PromptTooLongError, stream_with_idle_timeout
 from .parsing import SegmentType, StreamingTextParser
 from .prompts import (
     DEFAULT_INSTRUCTIONS,
@@ -22,10 +24,15 @@ from .runtime.executor import ExecutionResult
 from .security import SecurityError
 from .runtime.builtins import activate_skill
 from .skills import Skill, SkillRegistry
-from .compaction import CompactionState, compact_if_needed
-from .utils import extract_python_code
+from .compaction import (
+    CompactionState,
+    compact_if_needed,
+    full_compact_needed,
+    recover_from_overflow,
+)
+from .utils import extract_python_code, sanitize_surrogates
 from .types import (
-    MessageRole, _ROLE_MAP, Message, SystemMessage, UserMessage,
+    _ROLE_MAP, Message, SystemMessage, UserMessage,
     AssistantMessage, CodeExecutionMessage, ExecutionResultMessage,
     EventType, Event,
 )
@@ -45,6 +52,7 @@ class ExecutionStatus(Enum):
     """Status of agent execution."""
     SUCCESS = "success"
     MAX_STEPS_REACHED = "max_steps_reached"
+    TIMEOUT = "timeout"
 
 
 class AgentResponse:
@@ -80,8 +88,8 @@ class AgentResponse:
 # ---------------------------------------------------------------------------
 
 
-class _ExecutionContext:
-    """Tracks execution state across steps."""
+class _RunState:
+    """Mutable per-``run()`` state threaded through the step helpers."""
 
     def __init__(self, max_steps: int = 10):
         self.max_steps = max_steps
@@ -90,12 +98,9 @@ class _ExecutionContext:
         self.token_usage = TokenUsage()
         self._completed = False
         self.output_recoveries = 0
-
-    def start(self) -> None:
-        self.total_steps = 0
-        self.token_usage = TokenUsage()
-        self._completed = False
-        self.output_recoveries = 0
+        # Wall-clock origin for ``max_run_time``; stamped at construction,
+        # which every caller does immediately before the run loop.
+        self.start_time = time.monotonic()
 
     def complete(self) -> None:
         self._completed = True
@@ -117,6 +122,19 @@ class _ExecutionOutcome:
         self.next_prompt = next_prompt
 
 
+@dataclass
+class _ModelTurnResult:
+    """Collected output from one streaming model call.
+
+    Populated by :meth:`CaveAgent._stream_model` as it yields events, so the
+    orchestrating step can act on the finished turn (execute the response,
+    recover a truncated one, account usage) without re-reading the stream.
+    """
+    text: str = ""
+    finish_reason: str | None = None
+    usage: TokenUsage = field(default_factory=TokenUsage)
+
+
 # ---------------------------------------------------------------------------
 # CaveAgent
 # ---------------------------------------------------------------------------
@@ -136,10 +154,24 @@ class CaveAgent:
         instructions: User instructions defining agent role and behavior.
         skills: List of skills to load.
         max_steps: Maximum execution steps before stopping.
+        max_run_time: Wall-clock budget in seconds for the whole run.
+            Checked at each turn boundary; on exceed the run stops with
+            ``ExecutionStatus.TIMEOUT``. Bounds a run across turns but does not
+            interrupt a single in-flight step (use ``max_exec_timeout`` /
+            ``stream_idle_timeout`` for that). ``None`` (default) disables it.
         max_exec_output: Maximum length of execution output.
-        context_window: Model context window size in tokens for compaction.
+        context_window: Model state window size in tokens for compaction.
         max_exec_timeout: Maximum seconds for a single code execution.
-            None means no timeout.
+            None means no timeout. Note: with the in-process ``IPythonRuntime``,
+            a timeout unblocks the agent but cannot forcibly stop CPU-bound code
+            (``interrupt()`` is a no-op there), so the runaway cell keeps running
+            in the background. Use ``IPyKernelRuntime`` for enforceable timeouts.
+        stream_idle_timeout: Max seconds between two consecutive stream chunks
+            before the streaming model call is abandoned (raises TimeoutError,
+            salvaging any partial output). A sliding watchdog on chunk progress
+            that catches stalls transport timeouts miss — proxy keep-alives and
+            provider ping events keep the socket readable while no chunk is
+            produced. Default 120.0; ``None`` disables it. Streaming path only.
         system_instructions: System-level execution rules and examples.
         system_prompt_template: Template string for system prompt.
         python_block_identifier: Code block language identifier.
@@ -161,9 +193,11 @@ class CaveAgent:
         instructions: str = DEFAULT_INSTRUCTIONS,
         skills: list[Skill] | None = None,
         max_steps: int = 10,
+        max_run_time: float | None = None,
         max_exec_output: int = 5000,
         context_window: int = 128_000,
         max_exec_timeout: float | None = None,
+        stream_idle_timeout: float | None = 120.0,
         system_instructions: str = DEFAULT_SYSTEM_INSTRUCTIONS,
         system_prompt_template: str = DEFAULT_SYSTEM_PROMPT_TEMPLATE,
         python_block_identifier: str = DEFAULT_PYTHON_BLOCK_IDENTIFIER,
@@ -180,12 +214,20 @@ class CaveAgent:
         )
         self.python_block_identifier = python_block_identifier
         self.messages: list[Message] = list(messages) if messages else []
+        self.max_run_time = max_run_time
         self.max_exec_output = max_exec_output
         self.context_window = context_window
         self._compaction_state = CompactionState()
         self.max_exec_timeout = max_exec_timeout
+        # Max seconds between two consecutive stream chunks before the model
+        # call is abandoned. Catches stalls transport timeouts miss (proxy
+        # keep-alives / provider pings keep the socket readable while no chunk
+        # is produced). None disables the watchdog.
+        self.stream_idle_timeout = stream_idle_timeout
         self.display = display
         self._init_skills(skills)
+        # Last API-reported prompt-token count, used to sharpen compaction estimates.
+        self._last_prompt_tokens: int = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -201,34 +243,54 @@ class CaveAgent:
             return await self._run_with_display(query)
         return await self._run(query)
 
+    def _time_exceeded(self, state: _RunState) -> bool:
+        """Whether the run has exceeded ``max_run_time`` (wall-clock).
+
+        Checked at turn boundaries, so it bounds the run across turns but cannot
+        interrupt a single in-flight step; a stuck tool/stream is bounded by
+        ``max_exec_timeout`` / ``stream_idle_timeout`` instead.
+        """
+        if self.max_run_time is None:
+            return False
+        return (time.monotonic() - state.start_time) >= self.max_run_time
+
     async def _run(self, query: str) -> AgentResponse:
         """Non-streaming execution."""
-        context = _ExecutionContext(self.max_steps)
-        context.start()
+        state = _RunState(self.max_steps)
         self._initialize_conversation(query)
 
         response = ""
         for _ in range(self.max_steps):
-            response = await self._execute_step(context)
-            if context.is_completed:
-                return self._build_response(context, response, ExecutionStatus.SUCCESS)
+            if self._time_exceeded(state):
+                return self._build_response(state, response, ExecutionStatus.TIMEOUT)
+            response = await self._execute_step(state)
+            if state.is_completed:
+                return self._build_response(state, response, ExecutionStatus.SUCCESS)
 
-        return self._build_response(context, response, ExecutionStatus.MAX_STEPS_REACHED)
+        return self._build_response(state, response, ExecutionStatus.MAX_STEPS_REACHED)
 
     async def _run_with_display(self, query: str) -> AgentResponse:
         """Run via streaming to enable display, collect final response."""
         from .display import render_user_prompt
         render_user_prompt(query)
 
-        context = _ExecutionContext(self.max_steps)
+        state = _RunState(self.max_steps)
         last_content = ""
 
-        async for event in self._wrap_with_display(self._stream_events(query, context), context):
+        timed_out = False
+        async for event in self._wrap_with_display(self._stream_events(query, state), state):
             if event.type == EventType.FINAL_RESPONSE:
                 last_content = event.content
+            elif event.type == EventType.MAX_RUN_TIME_REACHED:
+                timed_out = True
 
-        status = ExecutionStatus.SUCCESS if context.is_completed else ExecutionStatus.MAX_STEPS_REACHED
-        return self._build_response(context, last_content, status)
+        if state.is_completed:
+            status = ExecutionStatus.SUCCESS
+        elif timed_out:
+            status = ExecutionStatus.TIMEOUT
+        else:
+            status = ExecutionStatus.MAX_STEPS_REACHED
+        return self._build_response(state, last_content, status)
 
     async def stream_events(self, query: str) -> AsyncGenerator[Event, None]:
         """Stream events during agent execution.
@@ -236,24 +298,26 @@ class CaveAgent:
         When ``display=True``, events are printed to the terminal via Rich
         as they are yielded (transparent pass-through).
         """
-        context = _ExecutionContext(self.max_steps)
+        state = _RunState(self.max_steps)
 
         if self.display:
-            async for event in self._wrap_with_display(self._stream_events(query, context), context):
+            async for event in self._wrap_with_display(self._stream_events(query, state), state):
                 yield event
         else:
-            async for event in self._stream_events(query, context):
+            async for event in self._stream_events(query, state):
                 yield event
 
-    async def _stream_events(self, query: str, context: _ExecutionContext) -> AsyncGenerator[Event, None]:
+    async def _stream_events(self, query: str, state: _RunState) -> AsyncGenerator[Event, None]:
         """Internal event stream generator."""
-        context.start()
         self._initialize_conversation(query)
 
         for _ in range(self.max_steps):
-            async for event in self._stream_step(context):
+            if self._time_exceeded(state):
+                yield Event(EventType.MAX_RUN_TIME_REACHED, "Maximum run time reached")
+                return
+            async for event in self._stream_step(state):
                 yield event
-            if context.is_completed:
+            if state.is_completed:
                 return
 
         yield Event(EventType.MAX_STEPS_REACHED, "Max steps reached")
@@ -295,65 +359,175 @@ class CaveAgent:
         self.messages, tier = await compact_if_needed(
             self.messages, self.model, self._compaction_state,
             context_window=self.context_window,
+            api_token_count=self._last_prompt_tokens,
         )
         after = len(self.messages)
         if tier:
             logger.info("Context compacted (tier=%s, %d → %d messages)", tier, before, after)
         return tier, before, after
 
-    async def _execute_step(self, context: _ExecutionContext) -> str:
-        """Execute a single step and return the model response."""
-        await self._maybe_compact()  # display handled by _stream_step only
-        context.total_steps += 1
+    async def _call_model_with_recovery(self) -> ModelResponse:
+        """``model.call()`` with one reactive overflow recovery.
 
-        model_response = await self.model.call(self._prepare_messages())
-        context.add_token_usage(model_response.token_usage)
+        If the API rejects the prompt as too long (:class:`PromptTooLongError`,
+        raised by the translating retry layer), aggressively compact and retry
+        once. A second overflow propagates — the preserved content alone
+        exceeds the window, which compaction cannot fix.
+        """
+        try:
+            return await self.model.call(self._prepare_messages())
+        except PromptTooLongError:
+            logger.warning("Prompt too long — attempting overflow recovery")
+            self.messages = await recover_from_overflow(self.messages, self.model)
+            return await self.model.call(self._prepare_messages())
 
-        if model_response.finish_reason == "length" and context.output_recoveries < MAX_OUTPUT_RECOVERIES:
-            logger.warning("Output truncated (recovery %d/%d)", context.output_recoveries + 1, MAX_OUTPUT_RECOVERIES)
-            self.add_message(AssistantMessage(model_response.content))
+    def _track_usage(self, state: _RunState, usage: TokenUsage) -> None:
+        """Accumulate a turn's token usage and remember its prompt-token count
+        (used to sharpen the next compaction estimate)."""
+        state.add_token_usage(usage)
+        if usage.prompt_tokens > 0:
+            self._last_prompt_tokens = usage.prompt_tokens
+
+    def _try_output_recovery(
+        self, state: _RunState, finish_reason: str | None, text: str,
+    ) -> bool:
+        """Handle a length-truncated model turn.
+
+        When the model stopped on ``finish_reason == "length"`` and the
+        per-run recovery budget isn't spent, append the partial output plus a
+        continuation prompt and return ``True`` — the caller ends the step so
+        the next one resumes generation. Otherwise reset the counter and return
+        ``False``. Shared by the streaming and non-streaming step paths.
+        """
+        if finish_reason == "length" and state.output_recoveries < MAX_OUTPUT_RECOVERIES:
+            logger.warning(
+                "Output truncated (recovery %d/%d)",
+                state.output_recoveries + 1, MAX_OUTPUT_RECOVERIES,
+            )
+            self.add_message(AssistantMessage(text))
             self.add_message(UserMessage(_RECOVERY_MESSAGE))
-            context.output_recoveries += 1
-            return model_response.content
+            state.output_recoveries += 1
+            return True
+        state.output_recoveries = 0
+        return False
 
-        context.output_recoveries = 0
-        return await self._process_response(model_response.content, context)
+    async def _execute_step(self, state: _RunState) -> str:
+        """Run one non-streaming step and return the model's response text."""
+        await self._maybe_compact()  # display handled by _stream_step only
+        state.total_steps += 1
 
-    async def _stream_step(self, context: _ExecutionContext) -> AsyncGenerator[Event, None]:
-        """Execute a single step with streaming output."""
-        from .compaction.tokens import compact_threshold, estimate_tokens
+        response = await self._call_model_with_recovery()
+        self._track_usage(state, response.token_usage)
 
-        # Check if full compact will likely be needed (microcompact alone won't suffice).
-        # Yield COMPACTING before the slow LLM call so the user sees the spinner.
+        if self._try_output_recovery(state, response.finish_reason, response.content):
+            return response.content
+        return await self._process_response(response.content, state)
+
+    async def _stream_step(self, state: _RunState) -> AsyncGenerator[Event, None]:
+        """Run one streaming step: proactive compaction, one (self-recovering)
+        model call, then execute the response — or continue a truncated one."""
+        # Announce compaction only when the slow LLM-summarization tier is
+        # imminent — a zero-cost microcompact shouldn't show a spinner.
         before = len(self.messages)
-        threshold = compact_threshold(self.context_window)
-        tokens = estimate_tokens(self.messages)
-        if tokens > threshold:
+        if full_compact_needed(self.messages, self.context_window, self._last_prompt_tokens):
             yield Event(EventType.COMPACTING, "")
-
         tier, _, after = await self._maybe_compact()
         if tier == "full_compact":
             yield Event(EventType.COMPACTED, f"{before} → {after}")
 
-        context.total_steps += 1
+        state.total_steps += 1
 
+        result = _ModelTurnResult()
+        async for event in self._stream_model_with_recovery(result):
+            yield event
+        self._track_usage(state, result.usage)
+
+        if self._try_output_recovery(state, result.finish_reason, result.text):
+            return
+        async for event in self._process_response_stream(result.text, state):
+            yield event
+
+    async def _stream_model_with_recovery(
+        self, result: _ModelTurnResult,
+    ) -> AsyncGenerator[Event, None]:
+        """:meth:`_stream_model` with one reactive overflow recovery.
+
+        On :class:`PromptTooLongError` — raised at request time, before any
+        event — aggressively compact and re-stream once. A second overflow
+        propagates: the preserved content alone exceeds the window.
+        """
+        try:
+            async for event in self._stream_model(result):
+                yield event
+        except PromptTooLongError:
+            logger.warning("Prompt too long — attempting overflow recovery")
+            yield Event(EventType.COMPACTING, "")
+            before = len(self.messages)
+            self.messages = await recover_from_overflow(self.messages, self.model)
+            yield Event(EventType.COMPACTED, f"{before} → {len(self.messages)}")
+            async for event in self._stream_model(result):
+                yield event
+
+    async def _stream_model(
+        self, result: _ModelTurnResult,
+    ) -> AsyncGenerator[Event, None]:
+        """Stream one model call: yield ``THINKING_CHUNK``/``THINKING``/``TEXT``/
+        ``CODE`` events and populate ``result`` with the collected text,
+        finish_reason, and usage.
+
+        Reasoning models stream their reasoning first: each reasoning delta is
+        emitted live as ``THINKING_CHUNK``; when the first answer token arrives,
+        the segment is sealed with a single ``THINKING`` carrying the full trace.
+
+        Propagates :class:`PromptTooLongError` (raised at request time, before
+        any chunk) for :meth:`_stream_model_with_recovery` to handle. A
+        mid-stream failure (dropped connection, idle-timeout stall) is salvaged
+        into whatever streamed so far rather than crashing the run.
+        """
         chunks: list[str] = []
         parser = StreamingTextParser(self.python_block_identifier)
         stream_response = self.model.stream(self._prepare_messages())
+        # The idle watchdog wraps iteration; usage/finish_reason are still read
+        # off the original ``stream_response`` (the wrapper drives its
+        # ``__anext__``, which updates those attributes).
+        guarded = stream_with_idle_timeout(stream_response, self.stream_idle_timeout)
+        thinking_sealed = False
+        try:
+            async for delta in guarded:
+                if delta.thinking:
+                    yield Event(EventType.THINKING_CHUNK, delta.thinking)
+                if not delta.content:
+                    continue
+                # First answer token: seal the reasoning segment with the full
+                # accumulated trace (for consumers that don't track chunks).
+                if not thinking_sealed and stream_response.thinking:
+                    yield Event(EventType.THINKING, stream_response.thinking)
+                    thinking_sealed = True
+                chunks.append(delta.content)
 
-        async for chunk in stream_response:
-            chunks.append(chunk)
-
-            for segment in parser.process_chunk(chunk):
-                if segment.type == SegmentType.TEXT:
-                    yield Event(EventType.TEXT, segment.content)
-                elif segment.type == SegmentType.CODE:
-                    yield Event(EventType.CODE, segment.content)
-                    if parser.is_first_code_block_completed():
-                        break
-
-            if parser.is_first_code_block_completed():
-                break
+                for segment in parser.process_chunk(delta.content):
+                    if segment.type == SegmentType.TEXT:
+                        yield Event(EventType.TEXT, segment.content)
+                    elif segment.type == SegmentType.CODE:
+                        yield Event(EventType.CODE, segment.content)
+                        if parser.is_first_code_block_completed():
+                            break
+                if parser.is_first_code_block_completed():
+                    break
+        except PromptTooLongError:
+            # Request-time overflow (before any chunk): let the recovery wrapper
+            # compact and re-stream. It never fires mid-stream — the model layer
+            # only translates the request-initiation error to this type.
+            raise
+        except Exception:
+            logger.warning("Streaming interrupted mid-response — continuing with partial output", exc_info=True)
+            if not chunks:
+                raise
+        finally:
+            # Close the underlying stream on every exit path — early break (code
+            # block complete), completion, overflow, or error. The SDK's
+            # read-to-completion auto-close doesn't fire when we stop reading early.
+            await stream_response.aclose()
 
         if not parser.is_first_code_block_completed():
             for segment in parser.flush():
@@ -362,57 +536,46 @@ class CaveAgent:
                 elif segment.type == SegmentType.CODE:
                     yield Event(EventType.CODE, segment.content)
 
-        context.add_token_usage(stream_response.usage)
-
-        model_response = "".join(chunks)
-
-        if stream_response.finish_reason == "length" and context.output_recoveries < MAX_OUTPUT_RECOVERIES:
-            logger.warning("Output truncated (recovery %d/%d)", context.output_recoveries + 1, MAX_OUTPUT_RECOVERIES)
-            self.add_message(AssistantMessage(model_response))
-            self.add_message(UserMessage(_RECOVERY_MESSAGE))
-            context.output_recoveries += 1
-            return
-
-        context.output_recoveries = 0
-        async for event in self._process_response_stream(model_response, context):
-            yield event
+        result.text = "".join(chunks)
+        result.finish_reason = stream_response.finish_reason
+        result.usage = stream_response.usage
 
     # ------------------------------------------------------------------
     # Response processing
     # ------------------------------------------------------------------
 
     async def _extract_and_execute(
-        self, model_response: str, context: _ExecutionContext,
+        self, model_response: str, state: _RunState,
     ) -> _ExecutionOutcome | None:
         """Extract code from model response and execute it if present.
 
         Returns the execution outcome, or None if no code was found
         (in which case the response is added as an AssistantMessage and
-        context is marked complete).
+        state is marked complete).
         """
         code_snippet = extract_python_code(model_response, self.python_block_identifier)
         if not code_snippet:
             self.add_message(AssistantMessage(model_response))
-            context.complete()
+            state.complete()
             return None
 
         self.add_message(CodeExecutionMessage(model_response))
-        outcome = await self._execute_code(code_snippet, context)
+        outcome = await self._execute_code(code_snippet, state)
         self.add_message(ExecutionResultMessage(outcome.next_prompt))
         return outcome
 
-    async def _process_response(self, model_response: str, context: _ExecutionContext) -> str:
+    async def _process_response(self, model_response: str, state: _RunState) -> str:
         """Process model response and execute code if present."""
-        await self._extract_and_execute(model_response, context)
+        await self._extract_and_execute(model_response, state)
         return model_response
 
     async def _process_response_stream(
         self,
         model_response: str,
-        context: _ExecutionContext,
+        state: _RunState,
     ) -> AsyncGenerator[Event, None]:
         """Process model response with streaming events."""
-        outcome = await self._extract_and_execute(model_response, context)
+        outcome = await self._extract_and_execute(model_response, state)
         if outcome is None:
             yield Event(EventType.FINAL_RESPONSE, model_response)
         else:
@@ -425,10 +588,10 @@ class CaveAgent:
     async def _execute_code(
         self,
         code_snippet: str,
-        context: _ExecutionContext,
+        state: _RunState,
     ) -> _ExecutionOutcome:
         """Execute code snippet and return the outcome."""
-        context.code_snippets.append(code_snippet)
+        state.code_snippets.append(code_snippet)
 
         execution_result = (
             await self._execute_with_timeout(code_snippet)
@@ -453,7 +616,10 @@ class CaveAgent:
                 next_prompt=SECURITY_ERROR_PROMPT.format(error=error_message),
             )
 
-        stdout = execution_result.stdout or "No output"
+        # Scrub lone surrogates from execution stdout (binary bytes printed by
+        # user code, half-decoded files, etc.) before it enters a message and
+        # the next model call's json.dumps would choke on it.
+        stdout = sanitize_surrogates(execution_result.stdout or "No output")
 
         # Output too long
         if len(stdout) > self.max_exec_output:
@@ -482,8 +648,12 @@ class CaveAgent:
     async def _execute_with_timeout(self, code_snippet: str) -> ExecutionResult | None:
         """Run code in a thread so sync-blocking code can be timed out.
 
-        On timeout, calls ``runtime.interrupt()`` to stop the execution
-        (effective for IPyKernelRuntime; best-effort for IPythonRuntime).
+        On timeout, calls ``runtime.interrupt()`` to stop the execution.
+        This is effective for IPyKernelRuntime (SIGINT to the kernel). For
+        the in-process IPythonRuntime, ``interrupt()`` is a no-op — the worker
+        thread keeps running the code to completion in the background; only the
+        agent's *wait* is bounded. Prefer IPyKernelRuntime when you need to
+        actually cancel runaway execution.
 
         Returns None on timeout, ExecutionResult otherwise.
         """
@@ -501,7 +671,7 @@ class CaveAgent:
     async def _wrap_with_display(
         self,
         events: AsyncGenerator[Event, None],
-        context: _ExecutionContext,
+        state: _RunState,
     ) -> AsyncGenerator[Event, None]:
         """Wrap events with terminal display.
 
@@ -509,7 +679,7 @@ class CaveAgent:
         so agent.py cannot import display.py at module level.
         """
         from .display import with_display
-        async for event in with_display(events, context):
+        async for event in with_display(events, state):
             yield event
 
     def _init_skills(self, skills: list[Skill] | None = None) -> None:
@@ -524,7 +694,9 @@ class CaveAgent:
 
     def _initialize_conversation(self, user_query: str):
         self._update_system_message()
-        self.add_message(UserMessage(user_query))
+        # Scrub lone surrogates from the user's turn (rich-text paste, broken
+        # emoji pipeline) before it enters history and the wire.
+        self.add_message(UserMessage(sanitize_surrogates(user_query)))
 
     def _update_system_message(self):
         system_prompt = self.build_system_prompt()
@@ -562,15 +734,15 @@ class CaveAgent:
 
     def _build_response(
         self,
-        context: _ExecutionContext,
+        state: _RunState,
         content: str,
         status: ExecutionStatus,
     ) -> AgentResponse:
         return AgentResponse(
             content=content,
-            code_snippets=context.code_snippets,
+            code_snippets=state.code_snippets,
             status=status,
-            steps_taken=context.total_steps,
+            steps_taken=state.total_steps,
             max_steps=self.max_steps,
-            token_usage=context.token_usage,
+            token_usage=state.token_usage,
         )

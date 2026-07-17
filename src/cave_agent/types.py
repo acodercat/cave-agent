@@ -58,12 +58,15 @@ class ExecutionResultMessage(Message):
 
 class EventType(Enum):
     TEXT = "text"
+    THINKING_CHUNK = "thinking_chunk"
+    THINKING = "thinking"
     CODE = "code"
     EXECUTION_OUTPUT = "execution_output"
     EXECUTION_ERROR = "execution_error"
     EXECUTION_OUTPUT_EXCEEDED = "execution_output_exceeded"
     FINAL_RESPONSE = "final_response"
     MAX_STEPS_REACHED = "max_steps_reached"
+    MAX_RUN_TIME_REACHED = "max_run_time_reached"
     SECURITY_ERROR = "security_error"
     COMPACTING = "compacting"
     COMPACTED = "compacted"
