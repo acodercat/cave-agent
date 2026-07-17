@@ -1,10 +1,10 @@
 from typing import List, Dict, Optional, Any
 
-from .base import Model, ModelResponse, StreamResponse, TokenUsage
-from .retry import with_retry
+from .base import Model, ModelResponse, StreamResponse
+from .retry import with_retry_typed
 
 
-class OpenAIServerModel(Model):
+class OpenAIModel(Model):
     """
     OpenAI-compatible LLM engine implementation.
     Supports OpenAI API and compatible endpoints.
@@ -33,7 +33,7 @@ class OpenAIServerModel(Model):
             import openai
         except ModuleNotFoundError:
             raise ModuleNotFoundError(
-                "Please install 'openai' extra to use OpenAIServerModel: `pip install 'cave_agent[openai]'`"
+                "Please install 'openai' extra to use OpenAIModel: `pip install 'cave_agent[openai]'`"
             )
 
         self.kwargs = kwargs
@@ -56,7 +56,7 @@ class OpenAIServerModel(Model):
     async def call(self, messages: List[Dict[str, str]]) -> ModelResponse:
         """Generate response using OpenAI API asynchronously."""
         params = self._prepare_params(messages)
-        response = await with_retry(
+        response = await with_retry_typed(
             lambda: self.client.chat.completions.create(**params, stream=False)
         )
 
@@ -66,42 +66,29 @@ class OpenAIServerModel(Model):
             content=content,
             token_usage=self._extract_token_usage(response),
             finish_reason=finish_reason,
+            thinking=self._extract_thinking(response),
         )
 
     def stream(self, messages: List[Dict[str, str]]) -> StreamResponse:
         """Stream response tokens using OpenAI API."""
         return _OpenAIStreamResponse(self, messages)
 
+    async def aclose(self) -> None:
+        """Close the underlying AsyncOpenAI client's connection pool."""
+        await self.client.close()
+
 
 class _OpenAIStreamResponse(StreamResponse):
-    """Async iterator over OpenAI streaming chunks with usage tracking."""
+    """OpenAI streaming response — iteration, usage capture, connect-retry, and
+    close are all handled by :class:`StreamResponse`; this only opens the stream."""
 
-    def __init__(self, model: OpenAIServerModel, messages: List[Dict[str, str]]):
+    def __init__(self, model: OpenAIModel, messages: List[Dict[str, str]]):
         super().__init__()
         self._model = model
         self._messages = messages
-        self._iterator = None
 
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self) -> str:
-        if self._iterator is None:
-            params = self._model._prepare_params(self._messages)
-            response = await with_retry(
-                lambda: self._model.client.chat.completions.create(
-                    **params, stream=True, stream_options={"include_usage": True},
-                )
-            )
-            self._iterator = response.__aiter__()
-
-        while True:
-            chunk = await self._iterator.__anext__()
-
-            if hasattr(chunk, "usage") and chunk.usage:
-                self.usage = self._model._extract_token_usage(chunk)
-                continue
-
-            text = self._process_stream_chunk(chunk)
-            if text is not None:
-                return text
+    async def _open_stream(self):
+        params = self._model._prepare_params(self._messages)
+        return await self._model.client.chat.completions.create(
+            **params, stream=True, stream_options={"include_usage": True},
+        )
