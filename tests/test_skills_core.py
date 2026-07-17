@@ -502,6 +502,63 @@ class TestAgentSkillsRuntime:
         assert "nonexistent" in result.stdout
 
 
+# Module-level helper whose ``__globals__`` is THIS test module (not the
+# runtime namespace) — used to simulate activate_skill being invoked
+# indirectly through a function imported from another module.
+def _foreign_caller(fn, name):
+    return fn(name)
+
+
+class TestActivateSkillNamespaceResolution:
+    """activate_skill must resolve the runtime namespace by walking the call
+    stack, so it works even when invoked indirectly through a helper whose own
+    module globals don't carry the skill store.
+
+    Regression: the earlier ``_getframe(1)`` + singleton-``get_ipython()``
+    fallback failed this in-process — the immediate caller frame belongs to the
+    foreign module (no store), and the in-process shell is non-singleton so
+    ``get_ipython()`` is ``None``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_activation_through_foreign_module_helper(self, mock_model):
+        def helper(x):
+            return x * 2
+
+        skill = Skill(
+            name="my-skill", description="Test", body_content="INSTRUCTIONS",
+            functions=[Function(helper)],
+        )
+        runtime = IPythonRuntime()
+        CaveAgent(model=mock_model, runtime=runtime, skills=[skill])
+        # Its __globals__ is this test module, not the cell's user_ns.
+        runtime.inject_into_namespace("_foreign_caller", _foreign_caller)
+
+        # Indirect activation: the immediate caller frame (_foreign_caller) has
+        # no store; the store lives in the cell frame further up the stack.
+        result = await runtime.execute('out = _foreign_caller(activate_skill, "my-skill")')
+        assert result.success, result.error
+
+        result = await runtime.execute("print(out)")
+        assert "INSTRUCTIONS" in result.stdout
+
+        # Exports were injected into the real runtime namespace, not a stray dict.
+        result = await runtime.execute("print(helper(5))")
+        assert "10" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_activation_through_cell_defined_helper(self, mock_model):
+        skill = Skill(name="my-skill", description="Test", body_content="INSTRUCTIONS")
+        runtime = IPythonRuntime()
+        CaveAgent(model=mock_model, runtime=runtime, skills=[skill])
+        result = await runtime.execute(
+            "def _h():\n    return activate_skill('my-skill')\nout = _h()"
+        )
+        assert result.success, result.error
+        result = await runtime.execute("print(out)")
+        assert "INSTRUCTIONS" in result.stdout
+
+
 # =============================================================================
 # IPyKernelRuntime Skills Tests
 # =============================================================================

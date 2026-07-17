@@ -97,15 +97,14 @@ class Runtime:
         if name not in self._variables:
             raise KeyError(f"Variable '{name}' does not exist. Available variables: {list(self._variables.keys())}")
 
-        # Check type consistency
+        # Check type consistency — allow subclass instances of the original type.
         original_value = self._variables[name].value
         if original_value is not None and value is not None:
             original_type = type(original_value)
-            new_type = type(value)
-            if original_type != new_type:
+            if not isinstance(value, original_type):
                 raise TypeError(
                     f"Cannot update variable '{name}': type mismatch. "
-                    f"Expected {original_type.__name__}, got {new_type.__name__}"
+                    f"Expected {original_type.__name__}, got {type(value).__name__}"
                 )
 
         # Update the Variable object's value
