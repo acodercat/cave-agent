@@ -1,7 +1,7 @@
 from .agent import CaveAgent
 from .types import Message, MessageRole, EventType
 from .display import with_display, render_events, render_user_prompt
-from .models import Model, ModelResponse, TokenUsage, OpenAIServerModel, LiteLLMModel
+from .models import Model, ModelResponse, TokenUsage, OpenAIModel, LiteLLMModel
 from .runtime import Runtime, IPythonRuntime, Function, Variable, Type
 from .security import SecurityChecker, SecurityError, SecurityViolation, SecurityRule, ImportRule, FunctionRule, AttributeRule, RegexRule
 from .skills import Skill, SkillDiscovery, SkillRegistry
@@ -19,7 +19,7 @@ __all__ = [
     "Model",
     "ModelResponse",
     "TokenUsage",
-    "OpenAIServerModel",
+    "OpenAIModel",
     "LiteLLMModel",
     "Message",
     "MessageRole",
