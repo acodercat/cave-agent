@@ -1,5 +1,3 @@
-from typing import Any
-
 from .skill import Skill
 
 
@@ -36,35 +34,20 @@ class SkillRegistry:
         if not self._skills:
             return "No skills available"
 
-        return "\n".join(
-            f"- {skill.name}: {skill.description}"
-            for skill in self._skills.values()
-        )
+        return "\n".join(f"- {skill.name}: {skill.description}" for skill in self._skills.values())
 
-    def build_skill_store(self) -> dict[str, dict[str, Any]]:
-        """Build a skill store for runtime injection.
+    def build_skill_store(self) -> dict[str, str]:
+        """Build the instruction store consumed by ``activate_skill``.
 
         Returns::
 
             {
-                "skill-name": {
-                    "body_content": "...",
-                    "exports": {"func_name": <callable>, "VAR": <value>, ...},
-                },
+                "skill-name": "skill instructions",
                 ...
             }
+
+        Runtime exports are deliberately absent. ``CaveAgent`` registers them
+        as managed hidden bindings so reset and collision semantics stay under
+        runtime ownership.
         """
-        store: dict[str, dict[str, Any]] = {}
-        for name, skill in self._skills.items():
-            exports: dict[str, Any] = {}
-            for func in skill.functions:
-                exports[func.name] = func.func
-            for var in skill.variables:
-                exports[var.name] = var.value
-            for type_obj in skill.types:
-                exports[type_obj.name] = type_obj.value
-            store[name] = {
-                "body_content": skill.body_content,
-                "exports": exports,
-            }
-        return store
+        return {name: skill.body_content for name, skill in self._skills.items()}

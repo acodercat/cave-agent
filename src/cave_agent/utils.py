@@ -1,7 +1,5 @@
 import re
 
-from .parsing import StreamingTextParser, SegmentType
-
 # Lone Unicode surrogates (U+D800–U+DFFF outside a valid pair) are valid
 # ``str`` members but invalid UTF-8. They survive in memory, then crash
 # ``json.dumps`` inside the provider SDK with "surrogates not allowed",
@@ -23,12 +21,3 @@ def sanitize_surrogates(text: str) -> str:
     if not text:
         return text
     return _LONE_SURROGATE_RE.sub(_REPLACEMENT_CHAR, text)
-
-
-def extract_python_code(response: str, python_block_identifier: str) -> str | None:
-    """Extract python code block from LLM output."""
-    parser = StreamingTextParser(python_block_identifier)
-    segments = parser.process_chunk(response)
-    segments.extend(parser.flush())
-    code_parts = [s.content for s in segments if s.type == SegmentType.CODE and s.content.strip()]
-    return "\n\n".join(code_parts) if code_parts else None

@@ -1,6 +1,5 @@
 import ast
 import logging
-from typing import List
 
 from .rules import SecurityRule, SecurityViolation
 
@@ -25,16 +24,13 @@ class SecurityChecker:
         >>>     ImportRule(set(["os", "subprocess", "sys", "shutil", "pathlib", "socket", "urllib", "http", "ctypes", "gc", "csv"])),
         >>>     FunctionRule(set(["eval", "exec", "compile", "open", "input", "raw_input", "exit", "quit", "__import__", "globals", "locals", "breakpoint"])),
         >>>     AttributeRule(set(["__globals__", "__locals__", "__code__", "__closure__", "__defaults__", "__dict__", "__class__", "__bases__", "__mro__", "__subclasses__", "__import__", "__builtins__"])),
-        >>>     RegexRule("Detects forbidden statements", r"delete")
+        >>>     RegexRule(r"delete", "Detects forbidden statements")
         >>> ])
         >>> violations = checker.check_code("import os; os.system('ls')")
         >>> print(len(violations))
     """
 
-    def __init__(
-        self,
-        rules: List[SecurityRule]
-    ):
+    def __init__(self, rules: list[SecurityRule]):
         """Initialize SecurityChecker with specified rules.
 
         Args:
@@ -55,7 +51,7 @@ class SecurityChecker:
 
         self.rules.append(rule)
 
-    def check_code(self, code: str) -> List[SecurityViolation]:
+    def check_code(self, code: str) -> list[SecurityViolation]:
         """Analyze Python code for security violations.
 
         Parses the code into an AST and applies all security rules
@@ -70,35 +66,60 @@ class SecurityChecker:
         """
         violations = []
         if not code or not code.strip():
-            violations.append(SecurityViolation(
-                message="Parse error: Code cannot be empty",
-            ))
+            violations.append(
+                SecurityViolation(
+                    message="Parse error: Code cannot be empty",
+                )
+            )
             return violations
 
         try:
             # Parse code into AST
             tree = ast.parse(code)
-        except SyntaxError as e:
-            violations.append(SecurityViolation(
-                message=f"Syntax error: {str(e)}",
-            ))
+        except SyntaxError as error:
+            violations.append(
+                SecurityViolation(
+                    message=f"Syntax error: {error}",
+                )
+            )
             return violations
-        except Exception as e:
-            violations.append(SecurityViolation(
-                message=f"Parse error: {str(e)}",
-            ))
+        except Exception as error:
+            violations.append(
+                SecurityViolation(
+                    message=f"Parse error: {error}",
+                )
+            )
             return violations
+
+        # Text rules see the source once, before the walk.
+        for rule in self.rules:
+            violations.extend(self._apply(rule, rule.check_source, code))
 
         # Analyze AST with all rules
         for node in ast.walk(tree):
             for rule in self.rules:
-                try:
-                    violations.extend(rule.check(node))
-                except Exception:
-                    logger.warning("Rule %r failed on node %s", rule, type(node).__name__, exc_info=True)
-                    continue
+                violations.extend(self._apply(rule, rule.check, node))
 
         return violations
+
+    @staticmethod
+    def _apply(rule, check, argument) -> list[SecurityViolation]:
+        """Run one check, reporting a failure *as a violation*.
+
+        A check that could not run has not found the code clean — it has found
+        out nothing. Skipping it silently disabled the rule for that cell while
+        the caller saw a clean report, which is the one outcome a security gate
+        must never produce.
+        """
+        try:
+            return check(argument)
+        except Exception as error:
+            logger.warning("Rule %r failed", rule, exc_info=True)
+            return [
+                SecurityViolation(
+                    message=f"Security rule could not be evaluated: {rule!r} ({error})",
+                )
+            ]
 
 
 class SecurityError(Exception):

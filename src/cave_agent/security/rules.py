@@ -2,15 +2,15 @@ import ast
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import List, Set, Optional
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass()
+@dataclass
 class SecurityViolation:
     """Represents a security violation found in code."""
+
     message: str
 
 
@@ -22,7 +22,7 @@ class SecurityRule(ABC):
     """
 
     @abstractmethod
-    def check(self, node: ast.AST) -> List[SecurityViolation]:
+    def check(self, node: ast.AST) -> list[SecurityViolation]:
         """Check if the AST node violates this rule.
 
         Args:
@@ -31,7 +31,15 @@ class SecurityRule(ABC):
         Returns:
             List of violations found (empty if none)
         """
-        pass
+        ...
+
+    def check_source(self, source: str) -> list[SecurityViolation]:
+        """Check the raw source once, before the AST walk.
+
+        For rules that are about *text* rather than structure. The default does
+        nothing, so structural rules need not care.
+        """
+        return []
 
 
 class ImportRule(SecurityRule):
@@ -42,7 +50,7 @@ class ImportRule(SecurityRule):
     ``from os.path import join``.
     """
 
-    def __init__(self, forbidden_modules: Set[str]):
+    def __init__(self, forbidden_modules: set[str]):
         self.forbidden_modules = forbidden_modules
 
     def _is_forbidden(self, module: str | None) -> bool:
@@ -56,22 +64,26 @@ class ImportRule(SecurityRule):
                 return True
         return False
 
-    def check(self, node: ast.AST) -> List[SecurityViolation]:
+    def check(self, node: ast.AST) -> list[SecurityViolation]:
         violations = []
 
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if self._is_forbidden(alias.name):
-                    violations.append(SecurityViolation(
-                        message=f"Forbidden import detected: {alias.name} at line {node.lineno}",
-                    ))
+                    violations.append(
+                        SecurityViolation(
+                            message=f"Forbidden import detected: {alias.name} at line {node.lineno}",
+                        )
+                    )
 
         elif isinstance(node, ast.ImportFrom):
             # node.module is None for relative imports like "from . import x"
             if self._is_forbidden(node.module):
-                violations.append(SecurityViolation(
-                    message=f"Forbidden import detected: from {node.module} at line {node.lineno}",
-                ))
+                violations.append(
+                    SecurityViolation(
+                        message=f"Forbidden import detected: from {node.module} at line {node.lineno}",
+                    )
+                )
 
         return violations
 
@@ -79,11 +91,11 @@ class ImportRule(SecurityRule):
 class FunctionRule(SecurityRule):
     """Rule to detect forbidden function calls."""
 
-    def __init__(self, forbidden_functions: Set[str], description: Optional[str] = None):
+    def __init__(self, forbidden_functions: set[str], description: str | None = None):
         self.description = description
         self.forbidden_functions = forbidden_functions
 
-    def check(self, node: ast.AST) -> List[SecurityViolation]:
+    def check(self, node: ast.AST) -> list[SecurityViolation]:
         # Fire once on the module root and walk it here, so each forbidden name
         # is judged in context. The checker's own ``ast.walk`` visits a call and
         # its callee ``Name`` as separate nodes, so a per-node rule would report
@@ -104,8 +116,11 @@ class FunctionRule(SecurityRule):
             if isinstance(child, ast.Call):
                 func_name = self._get_function_name(child.func)
                 if func_name in self.forbidden_functions:
-                    violations.append(self._violation(
-                        f"Forbidden function call '{func_name}' at line {child.lineno}"))
+                    violations.append(
+                        self._violation(
+                            f"Forbidden function call '{func_name}' at line {child.lineno}"
+                        )
+                    )
             # Aliasing / indirection, e.g. `f = open` or `sorted(key=eval)`: the
             # forbidden name is loaded but not the callee of a call handled above.
             elif (
@@ -114,8 +129,9 @@ class FunctionRule(SecurityRule):
                 and child.id in self.forbidden_functions
                 and child not in called_names
             ):
-                violations.append(self._violation(
-                    f"Forbidden reference to '{child.id}' at line {child.lineno}"))
+                violations.append(
+                    self._violation(f"Forbidden reference to '{child.id}' at line {child.lineno}")
+                )
 
         return violations
 
@@ -132,10 +148,10 @@ class FunctionRule(SecurityRule):
         """
         if isinstance(func_node, ast.Name):
             return func_node.id
-        elif isinstance(func_node, ast.Attribute):
+        if isinstance(func_node, ast.Attribute):
             # For calls like obj.method(), return the method name
             return func_node.attr
-        elif isinstance(func_node, ast.Call):
+        if isinstance(func_node, ast.Call):
             # For nested calls, recurse to find the innermost function
             return self._get_function_name(func_node.func)
         return ""
@@ -144,17 +160,19 @@ class FunctionRule(SecurityRule):
 class AttributeRule(SecurityRule):
     """Rule to detect forbidden attribute access."""
 
-    def __init__(self, forbidden_attributes: Set[str]):
+    def __init__(self, forbidden_attributes: set[str]):
         self.forbidden_attributes = forbidden_attributes
 
-    def check(self, node: ast.AST) -> List[SecurityViolation]:
+    def check(self, node: ast.AST) -> list[SecurityViolation]:
         violations = []
 
         if isinstance(node, ast.Attribute):
             if node.attr in self.forbidden_attributes:
-                violations.append(SecurityViolation(
-                    message=f"Forbidden attribute access detected: {node.attr} at line {node.lineno}",
-                ))
+                violations.append(
+                    SecurityViolation(
+                        message=f"Forbidden attribute access detected: {node.attr} at line {node.lineno}",
+                    )
+                )
 
         return violations
 
@@ -162,34 +180,25 @@ class AttributeRule(SecurityRule):
 class RegexRule(SecurityRule):
     """Security rule using regex patterns.
 
-    Matches the pattern against the unparsed source of the whole module,
-    so it scans every statement — assignments, calls, imports, comprehensions —
-    not just top-level expressions. Fires on the ``ast.Module`` node, so each
-    match is reported once.
+    Matches against the code as written, once per check. It used to match
+    against ``ast.unparse`` of the module instead, which recurses per node and
+    blew the stack on a long chained expression — and the failure was swallowed,
+    so every regex rule silently stopped applying to that cell. Reading the
+    source needs no recursion and sees what the author actually wrote.
     """
 
-    def __init__(self, pattern: str, description: Optional[str] = None):
+    def __init__(self, pattern: str, description: str | None = None):
         self.description = description if description else f"Regex rule: {pattern}"
         try:
             self.pattern = re.compile(pattern, re.MULTILINE | re.DOTALL)
-        except re.error as e:
-            raise ValueError(f"Invalid regex pattern '{pattern}': {e}")
+        except re.error as error:
+            raise ValueError(f"Invalid regex pattern '{pattern}': {error}") from error
 
-    def check(self, node: ast.AST) -> List[SecurityViolation]:
-        violations = []
+    def check(self, node: ast.AST) -> list[SecurityViolation]:
+        """Structural checking is not this rule's business — see check_source."""
+        return []
 
-        # ast.walk yields the Module node exactly once; unparse the whole
-        # tree there so we scan all statements a single time.
-        if isinstance(node, ast.Module):
-            try:
-                source = ast.unparse(node)
-            except Exception:
-                logger.debug("Failed to unparse module for regex check", exc_info=True)
-                return violations
-
-            if self.pattern.search(source):
-                violations.append(SecurityViolation(
-                    message=f"Security rule: {self.description}"
-                ))
-
-        return violations
+    def check_source(self, source: str) -> list[SecurityViolation]:
+        if self.pattern.search(source):
+            return [SecurityViolation(message=f"Security rule: {self.description}")]
+        return []

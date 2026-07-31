@@ -1,4 +1,4 @@
-from .streaming import StreamingTextParser, Segment, SegmentType
+from .streaming import Segment, SegmentType, StreamingTextParser
 
 __all__ = [
     "StreamingTextParser",

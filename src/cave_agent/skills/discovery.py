@@ -1,11 +1,18 @@
-from pathlib import Path
-from typing import List
-import re
-import yaml
 import importlib.util
+import re
+from pathlib import Path
+
+import yaml
+
+from ..runtime import Function, Type, Variable
+from .constants import (
+    INJECTION_FILENAME,
+    MAX_DESCRIPTION_LENGTH,
+    MAX_NAME_LENGTH,
+    NAME_PATTERN,
+    SKILL_FILENAME,
+)
 from .skill import Skill
-from .constants import SKILL_FILENAME, INJECTION_FILENAME, MAX_NAME_LENGTH, MAX_DESCRIPTION_LENGTH, NAME_PATTERN
-from ..runtime import Function, Variable, Type
 
 
 class SkillDiscovery:
@@ -18,7 +25,6 @@ class SkillDiscovery:
 
     class Error(Exception):
         """Raised when skill discovery or parsing fails."""
-        pass
 
     @classmethod
     def from_file(cls, path: Path) -> Skill:
@@ -55,7 +61,7 @@ class SkillDiscovery:
         )
 
     @classmethod
-    def from_directory(cls, directory: Path) -> List[Skill]:
+    def from_directory(cls, directory: Path) -> list[Skill]:
         """
         Discover all skills from a directory.
 
@@ -83,8 +89,8 @@ class SkillDiscovery:
         """Read file content."""
         try:
             return path.read_text(encoding="utf-8")
-        except Exception as e:
-            raise cls.Error(f"Failed to read skill file '{path}': {e}")
+        except Exception as error:
+            raise cls.Error(f"Failed to read skill file '{path}': {error}") from error
 
     @classmethod
     def _parse_frontmatter(cls, path: Path, content: str) -> tuple[str, str]:
@@ -95,8 +101,8 @@ class SkillDiscovery:
 
         try:
             frontmatter = yaml.safe_load(match.group(1))
-        except yaml.YAMLError as e:
-            raise cls.Error(f"Invalid YAML in '{path}': {e}")
+        except yaml.YAMLError as error:
+            raise cls.Error(f"Invalid YAML in '{path}': {error}") from error
 
         if not isinstance(frontmatter, dict):
             raise cls.Error(f"Frontmatter must be a dictionary in '{path}'")
@@ -122,7 +128,9 @@ class SkillDiscovery:
         if not isinstance(description, str):
             raise cls.Error(f"Field 'description' must be a string in '{path}'")
         if len(description) > MAX_DESCRIPTION_LENGTH:
-            raise cls.Error(f"Field 'description' exceeds {MAX_DESCRIPTION_LENGTH} characters in '{path}'")
+            raise cls.Error(
+                f"Field 'description' exceeds {MAX_DESCRIPTION_LENGTH} characters in '{path}'"
+            )
 
         return name, description
 
@@ -131,25 +139,33 @@ class SkillDiscovery:
         """Extract body content (everything after frontmatter)."""
         match = re.match(r"^---\s*\n.*?\n---\s*\n?", content, re.DOTALL)
         if match:
-            return content[match.end():].strip()
+            return content[match.end() :].strip()
         return content.strip()
 
     @classmethod
-    def _load_injection(cls, skill_dir: Path, skill_name: str) -> tuple[List[Function], List[Variable], List[Type]]:
+    def _load_injection(
+        cls,
+        skill_dir: Path,
+        skill_name: str,
+    ) -> tuple[list[Function], list[Variable], list[Type]]:
         """Load injection.py if present, return (functions, variables, types)."""
         injection_path = skill_dir / INJECTION_FILENAME
         if not injection_path.exists():
             return [], [], []
 
-        spec = importlib.util.spec_from_file_location(f"skill_injection_{skill_name}", injection_path)
+        spec = importlib.util.spec_from_file_location(
+            f"skill_injection_{skill_name}", injection_path
+        )
         if spec is None or spec.loader is None:
             raise cls.Error(f"Failed to load injection module: '{injection_path}'")
 
         try:
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-        except Exception as e:
-            raise cls.Error(f"Error loading injection module '{injection_path}': {e}")
+        except Exception as error:
+            raise cls.Error(
+                f"Error loading injection module '{injection_path}': {error}"
+            ) from error
 
         if not hasattr(module, "__exports__"):
             raise cls.Error(f"Missing __exports__ in '{injection_path}'")
