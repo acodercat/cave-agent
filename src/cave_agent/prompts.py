@@ -68,11 +68,6 @@ Note: All variables from previous executions are still available.
 """
 
 
-EXECUTION_OUTPUT_EXCEEDED_PROMPT = """
-Output exceeded {max_length} characters ({output_length} generated).
-Modify your code to print only essential information (e.g., use head(), describe(), or summaries instead of full data).
-"""
-
 SECURITY_ERROR_PROMPT = """
 <security_error>
 {error}
