@@ -79,7 +79,10 @@ _ADMISSION_ATTEMPTS = 3
 # since every message resets the window. A cell that prints as it goes can run
 # for hours; one that computes silently is cut off here. Configurable per
 # runtime (``IPyKernelRuntime(iopub_timeout=...)``) because the right value is
-# workload-specific: a long silent model fit legitimately needs more.
+# workload-specific: a long silent model fit legitimately needs more. It also
+# bounds *injection* deserialization, which is silent by nature — a binding
+# whose dill payload takes longer than this to reconstruct needs the knob
+# raised, since an injected value cannot print progress.
 DEFAULT_IOPUB_TIMEOUT = 30.0
 
 # Infrastructure lives under a dictionary key that cannot be a Python
@@ -1154,7 +1157,7 @@ class IPyKernelExecutor:
         for index, (name, code) in enumerate(pending):
             try:
                 await self._execute_silent(code)
-            except BaseException:
+            except BaseException as error:
                 # This request was dispatched, so replaying it could run a dill
                 # deserializer's side effects twice. Preserve only work that was
                 # never sent and fail closed until this name is replaced/reset.
@@ -1162,6 +1165,19 @@ class IPyKernelExecutor:
                     self._pending_injections = dict(pending[index + 1 :]) | self._pending_injections
                     if name not in self._pending_injections:
                         self._failed_injections.add(name)
+                if isinstance(error, RuntimeExecutionError) and "timed out" in str(error):
+                    # Deserializing an injected value produces no IOPub
+                    # traffic, so the silence timeout bounds the *whole*
+                    # deserialization — and unlike a user cell, an injected
+                    # value cannot print progress to extend it. Without the
+                    # knob's name in the error, a large binding surfaced as a
+                    # generic kernel timeout with no path out.
+                    raise RuntimeExecutionError(
+                        f"Injecting binding '{name}' exceeded the kernel's "
+                        f"silence timeout ({self._iopub_timeout}s) while "
+                        "deserializing. Large values need a higher "
+                        "iopub_timeout on the runtime."
+                    ) from error
                 raise
             else:
                 with self._pending_lock:

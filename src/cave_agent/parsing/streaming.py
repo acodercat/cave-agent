@@ -150,6 +150,13 @@ class StreamingTextParser:
         # Number of leading spaces on the current code line. ``None`` once the
         # line contains code or exceeds Markdown's three-space fence indent.
         self._code_line_indent: int | None = 0
+        # Same tracking for prose. An *opening* fence is only a fence at the
+        # start of a line (three-space tolerance, as for closing): recognized
+        # mid-line, prose that merely mentions ```python — "wrap code in
+        # ```python fences" — opened a bogus block that the real block's
+        # closing fence then closed, executing the prose between them while
+        # the actual code was discarded.
+        self._text_line_indent: int | None = 0
 
     def _process_character(self, char: str) -> list[Segment]:
         """
@@ -171,7 +178,7 @@ class StreamingTextParser:
         In text mode, characters are streamed immediately unless
         a backtick is encountered, which triggers backtick counting.
         """
-        if char == "`":
+        if char == "`" and self._text_line_indent is not None:
             segments = []
             # Flush any buffered text before switching modes
             if self.text_buffer:
@@ -182,6 +189,7 @@ class StreamingTextParser:
             return segments
         else:
             # Stream text character immediately
+            self._track_text_char(char)
             return [Segment(SegmentType.TEXT, char)]
 
     def _handle_backtick_count_mode(self, char: str) -> list[Segment]:
@@ -208,6 +216,7 @@ class StreamingTextParser:
             segments = [Segment(SegmentType.TEXT, "`" * self.backtick_count + char)]
             self.mode = self.Mode.TEXT
             self.backtick_count = 0
+            self._resume_text_after_replay(char)
             return segments
 
         return []
@@ -229,15 +238,16 @@ class StreamingTextParser:
             segments = [Segment(SegmentType.TEXT, "```" + self.language_match_buffer + char)]
             self.mode = self.Mode.TEXT
             self.language_match_buffer = ""
+            self._resume_text_after_replay(char)
             return segments
 
-        # Still building the language identifier
+        # Still building the language identifier. Matched case-insensitively:
+        # Markdown's info string is case-whatever and models write ```Python
+        # often enough that a case-sensitive match silently streamed the whole
+        # block as prose and the run completed without executing it.
         if len(self.language_match_buffer) < len(self.language_identifier):
-            if char == self.language_identifier[len(self.language_match_buffer)]:
+            if char.lower() == self.language_identifier[len(self.language_match_buffer)].lower():
                 self.language_match_buffer += char
-                if self.language_match_buffer == self.language_identifier:
-                    # Full match achieved, wait for delimiter
-                    pass
                 return []
             else:
                 return failed_match()
@@ -349,10 +359,31 @@ class StreamingTextParser:
         """Whether the code so far ends mid-line, joined to the next one.
 
         An odd number of trailing backslashes continues the line; an even
-        number is escaped backslashes and ends it.
+        number is escaped backslashes and ends it. The possible fence may sit
+        after up to three spaces of indent; those spaces are the fence line's,
+        not the code's, so they are stripped first — left in place, they hid
+        the backslash and an *indented* fence inside a continued string closed
+        the block mid-string.
         """
-        line = self.code_buffer.rstrip("\r\n")
+        line = self.code_buffer.rstrip(" ").rstrip("\r\n")
         return (len(line) - len(line.rstrip("\\"))) % 2 == 1
+
+    def _track_text_char(self, char: str) -> None:
+        """Track whether the next backtick could open a fence."""
+        if char == "\n":
+            self._text_line_indent = 0
+        elif self._text_line_indent is not None and char == " " and self._text_line_indent < 3:
+            self._text_line_indent += 1
+        else:
+            self._text_line_indent = None
+
+    def _resume_text_after_replay(self, last_char: str) -> None:
+        """Reset line tracking after buffered backticks are replayed as text.
+
+        The replayed run contains backticks, so the line holds prose unless
+        *last_char* just ended it.
+        """
+        self._text_line_indent = 0 if last_char == "\n" else None
 
     def _finished_code(self) -> str:
         """The buffered block as runnable source.
@@ -393,3 +424,6 @@ class StreamingTextParser:
         self.in_code_block = False
         self.mode = self.Mode.TEXT
         self.backtick_count = 0
+        # Just past a closing (or replayed empty) fence: mid-line until the
+        # next newline, so a backtick here cannot open a new fence.
+        self._text_line_indent = None

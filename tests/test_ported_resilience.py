@@ -13,6 +13,7 @@ import pytest
 from cave_agent import CaveAgent
 from cave_agent.compaction import Compactor
 from cave_agent.compaction.prompts import COMPACT_SYSTEM_PROMPT
+from cave_agent.compaction.tokens import compact_threshold
 from cave_agent.events import (
     FinalResponseEvent,
     TextEvent,
@@ -708,7 +709,12 @@ class TestTheOutputReserveTracksTheGeneratingModel:
     Compactor resolves it from its own model — which, in the documented
     `Compactor(model=cheap_summarizer)` setup, is the summarizer. A summarizer
     declaring 1024 against an agent generating 8192 left the threshold ~7k too
-    high, so compaction returned a prompt that still overran the window."""
+    high, so compaction returned a prompt that still overran the window.
+
+    Adoption, not assignment: writing `output_reserve` made the adopted value
+    indistinguishable from a caller's explicit reserve and mutated
+    configuration shared between agents.
+    """
 
     class _Declaring(Model):
         def __init__(self, max_output_tokens):
@@ -721,28 +727,37 @@ class TestTheOutputReserveTracksTheGeneratingModel:
             raise NotImplementedError
 
     def test_a_supplied_compactor_adopts_the_agents_model(self):
-        agent = CaveAgent(
-            model=self._Declaring(8192),
-            compactor=Compactor(self._Declaring(1024), context_window=100_000),
-        )
+        compactor = Compactor(self._Declaring(1024), context_window=100_000)
+        agent = CaveAgent(model=self._Declaring(8192), compactor=compactor)
 
-        assert agent.compactor.output_reserve == 8192
+        assert agent.compactor.threshold() == compact_threshold(100_000, 8192)
+
+    def test_adoption_does_not_masquerade_as_an_explicit_reserve(self):
+        compactor = Compactor(self._Declaring(1024), context_window=100_000)
+        CaveAgent(model=self._Declaring(8192), compactor=compactor)
+
+        assert compactor.output_reserve is None
 
     def test_an_explicit_reserve_still_wins(self):
-        agent = CaveAgent(
-            model=self._Declaring(8192),
-            compactor=Compactor(self._Declaring(1024), context_window=100_000, output_reserve=3000),
-        )
+        compactor = Compactor(self._Declaring(1024), context_window=100_000, output_reserve=3000)
+        CaveAgent(model=self._Declaring(8192), compactor=compactor)
 
-        assert agent.compactor.output_reserve == 3000
+        assert compactor.threshold() == compact_threshold(100_000, 3000)
 
-    def test_a_silent_agent_model_leaves_the_fallback_in_place(self):
-        agent = CaveAgent(
-            model=self._Declaring(None),
-            compactor=Compactor(self._Declaring(None), context_window=100_000),
-        )
+    def test_a_shared_compactor_reserves_for_the_larger_agent(self):
+        """Two agents, one compactor: any single adopted value is wrong for
+        one of them, and over-reserving is the safe direction."""
+        compactor = Compactor(self._Declaring(None), context_window=100_000)
+        CaveAgent(model=self._Declaring(8192), compactor=compactor)
+        CaveAgent(model=self._Declaring(2048), compactor=compactor)
 
-        assert agent.compactor.output_reserve is None
+        assert compactor.threshold() == compact_threshold(100_000, 8192)
+
+    def test_a_silent_agent_model_falls_back_to_the_summarizer(self):
+        compactor = Compactor(self._Declaring(4096), context_window=100_000)
+        CaveAgent(model=self._Declaring(None), compactor=compactor)
+
+        assert compactor.threshold() == compact_threshold(100_000, 4096)
 
 
 class TestLiteLLMCarriesItsDeclaredCap:
@@ -770,3 +785,36 @@ class TestLiteLLMCarriesItsDeclaredCap:
 
         with pytest.raises(ValueError):
             LiteLLMModel(model_id="gpt-4o", max_output_tokens=4096, max_tokens=2048)
+
+
+class TestProgrammingErrorsAreNotRetried:
+    """The message tier is a last resort for SDK errors, so it must not apply
+    to Python's own programming errors: a TypeError for a misspelled kwarg
+    that happens to be named `request_timeout` is deterministic, and retrying
+    it spent the whole backoff budget before surfacing an immediate failure."""
+
+    def test_a_type_error_mentioning_timeout_is_not_retryable(self):
+        from cave_agent.models.retry import is_retryable
+
+        error = TypeError("got an unexpected keyword argument 'request_timeout'")
+
+        assert is_retryable(error) is False
+
+    def test_a_value_error_mentioning_connection_is_not_retryable(self):
+        from cave_agent.models.retry import is_retryable
+
+        assert is_retryable(ValueError("invalid connection string")) is False
+
+    def test_an_sdk_error_mentioning_timeout_still_is(self):
+        from cave_agent.models.retry import is_retryable
+
+        class SomeSDKError(Exception):
+            pass
+
+        assert is_retryable(SomeSDKError("read timeout on upstream")) is True
+
+    def test_builtin_transport_errors_still_are(self):
+        from cave_agent.models.retry import is_retryable
+
+        assert is_retryable(ConnectionError("reset")) is True
+        assert is_retryable(TimeoutError()) is True

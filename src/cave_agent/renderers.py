@@ -25,6 +25,7 @@ Style:
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import TYPE_CHECKING
 
@@ -97,6 +98,14 @@ class TerminalRenderer:
     buffers).
     """
 
+    # Minimum seconds between Markdown rebuilds while prose streams in.
+    # TextEvents arrive per delta — often per character — and rich's
+    # ``Markdown`` runs a full CommonMark parse of the whole buffer each time
+    # it is *constructed*, before Live's paint throttle is ever consulted.
+    # Unthrottled that is O(n²) CPU on the event loop, competing with the
+    # provider stream read (~1.4s for a 2.9KB answer, measured).
+    _MARKDOWN_REBUILD_INTERVAL = 0.125
+
     def __init__(self) -> None:
         self._live: Live | None = None
         self._mode: str = ""  # "thinking", "text", or "code"
@@ -105,6 +114,8 @@ class TerminalRenderer:
         # A non-transient (frozen) live block leaves the cursor mid-line; when
         # set, ``_stop_live`` ends that line so the next header starts cleanly.
         self._live_needs_break: bool = False
+        self._last_markdown_rebuild: float = 0.0
+        self._text_pending_render: bool = False
 
     async def render(self, events: AsyncIterator[Event]) -> AsyncGenerator[Event, None]:
         """Consume *events*, render each, and re-yield it unchanged."""
@@ -182,23 +193,32 @@ class TerminalRenderer:
             self._stop_live()
 
         self._text_buffer.append(event.content)
-        text = "".join(self._text_buffer)
 
         if self._mode != "text":
             console.print()
             self._mode = "text"
             self._live = Live(
-                Markdown(text),
+                Markdown("".join(self._text_buffer)),
                 console=console,
                 refresh_per_second=8,
                 transient=False,
             )
             self._live.start()
             self._live_needs_break = True
+            self._last_markdown_rebuild = time.monotonic()
+            self._text_pending_render = False
         else:
             live = self._live
             assert live is not None
-            live.update(Markdown(text))
+            now = time.monotonic()
+            if now - self._last_markdown_rebuild >= self._MARKDOWN_REBUILD_INTERVAL:
+                live.update(Markdown("".join(self._text_buffer)))
+                self._last_markdown_rebuild = now
+                self._text_pending_render = False
+            else:
+                # Buffered; ``_stop_live`` paints the final state, so gated
+                # characters are deferred, never dropped.
+                self._text_pending_render = True
 
     def _handle_code(self, event: CodeEvent) -> None:
         self._stop_live()
@@ -356,6 +376,11 @@ class TerminalRenderer:
 
     def _stop_live(self) -> None:
         if self._live:
+            if self._mode == "text" and self._text_pending_render:
+                # Paint what the rebuild gate deferred before the block
+                # freezes, or the last <interval> of prose would vanish.
+                self._live.update(Markdown("".join(self._text_buffer)))
+                self._text_pending_render = False
             self._live.stop()
             self._live = None
             if self._live_needs_break:

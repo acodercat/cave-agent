@@ -2002,3 +2002,92 @@ class TestAnIndentedBlockRuns:
         results = [m.content for m in agent.messages if m.role == MessageRole.EXECUTION_RESULT]
         assert "42" in "".join(results)
         assert "SyntaxError" not in "".join(results)
+
+
+class TestRecoveryNeverRecordsAnEmptyAssistantTurn:
+    """A reasoning model can spend the entire completion cap on thinking:
+    finish_reason "length" with zero visible text. Recorded as an empty
+    assistant message, history poisoned every later request against providers
+    that reject empty assistant content with a definite 400 — never retried."""
+
+    async def test_a_thinking_only_length_turn_leaves_no_empty_message(self):
+        agent = CaveAgent(
+            model=FakeModel(
+                ["", "All recovered."],
+                finish_reasons=["length", "stop"],
+                thinking="very long reasoning",
+            ),
+            runtime=IPythonRuntime(),
+        )
+
+        response = await agent.run("go")
+
+        assert response.stop_reason is StopReason.COMPLETED
+        empties = [m for m in agent.messages if m.wire_role == "assistant" and m.content == ""]
+        assert empties == []
+
+    async def test_a_partial_text_turn_is_still_recorded_for_resumption(self):
+        agent = CaveAgent(
+            model=FakeModel(
+                ["The answer starts", " and finishes here."],
+                finish_reasons=["length", "stop"],
+            ),
+            runtime=IPythonRuntime(),
+        )
+
+        await agent.run("go")
+
+        assert any(
+            m.wire_role == "assistant" and m.content == "The answer starts" for m in agent.messages
+        )
+
+
+class TestAFailureWithNoOutputStillReadsAsOne:
+    """The executor's catch-all can return an error-only result — the
+    execution machinery itself raised, before the cell produced output or a
+    traceback. Rendered as the empty-output placeholder, the model read "No
+    output", assumed success, and answered from state the code never made."""
+
+    async def test_the_error_reaches_the_model_not_the_placeholder(self):
+        class BrokenRuntime(IPythonRuntime):
+            async def execute(self, code):
+                return ExecutionResult(error=MemoryError("machinery died"), stdout=None)
+
+        agent = CaveAgent(
+            model=FakeModel(["```python\nx = 1\n```", "Done."]),
+            runtime=BrokenRuntime(),
+        )
+
+        await agent.run("go")
+
+        (result_msg,) = [m for m in agent.messages if m.role == MessageRole.EXECUTION_RESULT]
+        assert "MemoryError" in result_msg.content
+        assert "machinery died" in result_msg.content
+
+
+class TestLegacyTemplatesStillRender:
+    """<=0.8's default template carried {current_time}; a caller's copy of it
+    raised KeyError on every run once the kwarg stopped being passed. Passing
+    it costs nothing — str.format ignores unused kwargs — and the default
+    template stays byte-stable since it no longer contains the field."""
+
+    async def test_a_template_with_current_time_renders(self):
+        agent = CaveAgent(
+            model=FakeModel(["Done."]),
+            runtime=IPythonRuntime(),
+            system_prompt_template=(
+                "Time: {current_time}\n{functions}{variables}{types}"
+                "{skills}{instructions}{system_instructions}"
+            ),
+        )
+
+        response = await agent.run("go")
+
+        assert response.stop_reason is StopReason.COMPLETED
+        assert agent.messages[0].content.startswith("Time: 2")
+
+    def test_the_default_template_is_time_free(self):
+        """The stability the reminder-message design bought must not regress."""
+        agent = CaveAgent(model=FakeModel(), runtime=IPythonRuntime())
+
+        assert agent.build_system_prompt() == agent.build_system_prompt()

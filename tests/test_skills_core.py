@@ -763,3 +763,64 @@ class TestInjectionModulesResolveTheirOwnClasses:
             SkillDiscovery.from_directory(Path(temp_dir))
 
         assert "skill_injection_broken-skill" not in sys.modules
+
+
+class TestSkillSignatureTypesReachTheNamespace:
+    """Skill exports are hidden raw bindings, and the raw-binding path skipped
+    the signature walk explicit registration performs — so a skill whose
+    instructions say to construct Order(...) shipped a namespace with no
+    Order, and generated code failed NameError on the skill's own contract."""
+
+    @staticmethod
+    def _order_skill():
+        from dataclasses import dataclass
+
+        @dataclass
+        class Order:
+            item: str
+
+        def add_order(order: Order) -> str:
+            return f"added {order.item}"
+
+        return Skill(
+            name="orders",
+            description="order management",
+            body_content="Call add_order(Order(item=...))",
+            functions=[Function(add_order)],
+        ), Order
+
+    async def test_a_signature_type_is_constructible_in_generated_code(self):
+        from cave_agent import CaveAgent
+        from tests.fakes import FakeModel
+
+        skill, _ = self._order_skill()
+        runtime = IPythonRuntime()
+        CaveAgent(model=FakeModel(), runtime=runtime, skills=[skill])
+
+        result = await runtime.execute("print(add_order(Order(item='book')))")
+
+        assert result.success
+        assert "added book" in result.stdout
+
+    async def test_a_variable_value_type_is_injected_too(self):
+        from dataclasses import dataclass
+
+        from cave_agent import CaveAgent
+        from tests.fakes import FakeModel
+
+        @dataclass
+        class Config:
+            retries: int
+
+        skill = Skill(
+            name="configured",
+            description="carries a config object",
+            body_content="Read cfg, or build another Config.",
+            variables=[Variable("cfg", Config(retries=3))],
+        )
+        runtime = IPythonRuntime()
+        CaveAgent(model=FakeModel(), runtime=runtime, skills=[skill])
+
+        result = await runtime.execute("print(Config(retries=9))")
+
+        assert result.success

@@ -106,6 +106,25 @@ class Compactor:
         self.output_reserve = output_reserve
         self.token_estimator = token_estimator
         self.state = CompactionState()
+        self._adopted_reserve: int | None = None
+
+    def adopt_output_reserve(self, tokens: int | None) -> None:
+        """Record the generating model's declared output cap.
+
+        The reserve holds room for the *agent's* next completion, but this
+        compactor's own model may be a cheap summarizer whose declaration is
+        far smaller — sizing from it left the threshold thousands of tokens
+        too high. Adoption is a separate field, not a write to
+        ``output_reserve``: overwriting that made the adopted value
+        indistinguishable from a caller's explicit reserve, and mutated
+        configuration shared between agents. Multiple adopters keep the
+        largest declaration — over-reserving compacts a little early,
+        under-reserving overruns the window.
+        """
+        if tokens is None:
+            return
+        if self._adopted_reserve is None or tokens > self._adopted_reserve:
+            self._adopted_reserve = tokens
 
     def estimate_tokens(
         self,
@@ -135,14 +154,17 @@ class Compactor:
 
         Reserves room for the next completion so a request prepared just under
         the line still satisfies ``input + max_output <= context_window``.
-        Precedence: explicit ``output_reserve`` → the model's own
-        ``max_output_tokens`` declaration → a conservative fallback.
+        Precedence: explicit ``output_reserve`` → the adopted generating
+        model's declaration (:meth:`adopt_output_reserve`) → this compactor's
+        own model declaration → a conservative fallback.
 
         Tested against ``None`` rather than falsiness so an explicit reserve of
         ``0`` ("I have my own budgeting, don't hold anything back") is honoured
         instead of silently falling through to the default.
         """
         reserve = self.output_reserve
+        if reserve is None:
+            reserve = self._adopted_reserve
         if reserve is None:
             reserve = getattr(self.model, "max_output_tokens", None)
         if reserve is None:

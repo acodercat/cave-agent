@@ -109,7 +109,7 @@ class TestStreamingTextParser:
     @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
     def test_python_code_block_complete_flow(self, chunk_size):
         """Text before the block, the code, and the untouched tail."""
-        before, code_block, after = "Before code: ", "```python\nprint('test')\n```", " After code"
+        before, code_block, after = "Before code:\n", "```python\nprint('test')\n```", " After code"
 
         segments, unparsed = parse(before + code_block + after, chunk_size)
 
@@ -315,12 +315,12 @@ class TestStreamingTextParser:
     def test_python_code_block_detection(self, chunk_size):
         """Leading text is preserved exactly — no character is consumed."""
         segments, unparsed = parse(
-            "Text before ```python\nprint('hello')\n``` text after",
+            "Text before\n```python\nprint('hello')\n``` text after",
             chunk_size,
         )
 
         assert code_of(segments) == ["print('hello')"]
-        assert text_of(segments) == "Text before "
+        assert text_of(segments) == "Text before\n"
         assert unparsed == " text after"
 
     def test_non_python_block_buffering(self):
@@ -413,11 +413,11 @@ class TestStreamingTextParser:
     @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
     def test_streaming_vs_flush_completeness(self, chunk_size):
         """Every character is accounted for: consumed, or left unparsed."""
-        input_text = "Start ```python\ncode\n``` end"
+        input_text = "Start\n```python\ncode\n``` end"
 
         segments, unparsed = parse(input_text, chunk_size)
 
-        assert text_of(segments) == "Start "
+        assert text_of(segments) == "Start\n"
         assert code_of(segments) == ["code"]
         assert unparsed == " end"
 
@@ -501,10 +501,10 @@ class TestStreamingTextParser:
     @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
     def test_boundary_between_text_and_code(self, chunk_size):
         """No delimiter bleeds into the neighbouring segment."""
-        segments, unparsed = parse("text```python\ncode\n```more", chunk_size)
+        segments, unparsed = parse("text\n```python\ncode\n```more", chunk_size)
 
         assert code_of(segments) == ["code"]
-        assert text_of(segments) == "text"
+        assert text_of(segments) == "text\n"
         assert unparsed == "more"
 
     def test_single_backtick_in_text_bug_case_1(self):
@@ -814,3 +814,77 @@ class TestAnIndentedBlockIsRunnable:
         segments, _ = parse("```python\ndef f():\n    return 1\n```\n", chunk_size)
 
         assert code_of(segments) == ["def f():\n    return 1"]
+
+
+class TestAnOpeningFenceIsLineAnchored:
+    """An opening fence is only a fence at the start of a line, as in Markdown.
+
+    Recognized mid-line, prose that merely *mentions* ```python — "wrap code
+    in ```python fences like this:" — opened a bogus block that the real
+    block's line-start fence then closed: the agent executed the prose between
+    them and the actual code was discarded in the remainder.
+    """
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    def test_prose_mentioning_a_fence_does_not_open_one(self, chunk_size):
+        segments, _ = parse(
+            "Wrap code in ```python fences like this:\n```python\nprint('hi')\n```",
+            chunk_size,
+        )
+
+        assert code_of(segments) == ["print('hi')"]
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    def test_up_to_three_leading_spaces_still_open(self, chunk_size):
+        segments, _ = parse("   ```python\nx = 1\n```\n", chunk_size)
+
+        assert code_of(segments) == ["x = 1"]
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    def test_a_fence_at_response_start_opens(self, chunk_size):
+        segments, _ = parse("```python\nx = 1\n```\n", chunk_size)
+
+        assert code_of(segments) == ["x = 1"]
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    def test_inline_code_spans_stay_prose(self, chunk_size):
+        text = "Use the `add` function, or `` a double span ``, here.\n"
+        segments, unparsed = parse(text, chunk_size)
+
+        assert code_of(segments) == []
+        assert text_of(segments) == text
+        assert unparsed == ""
+
+
+class TestTheLanguageTagIsCaseInsensitive:
+    """Markdown's info string carries no case rule, and models write
+    ```Python often enough that a case-sensitive match silently streamed the
+    whole block as prose — the run completed without executing it."""
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    @pytest.mark.parametrize("tag", ["Python", "PYTHON", "python"])
+    def test_any_casing_opens_the_block(self, chunk_size, tag):
+        segments, _ = parse(f"```{tag}\nresult = 5 + 3\n```\n", chunk_size)
+
+        assert code_of(segments) == ["result = 5 + 3"]
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    def test_a_longer_tag_still_fails_the_match(self, chunk_size):
+        segments, _ = parse("```Pythonic\nnot code\n```\n", chunk_size)
+
+        assert code_of(segments) == []
+
+
+class TestAnIndentedFenceInsideAContinuedString:
+    """The fence-line indent belongs to the fence, not the code, so the
+    continuation check must look past it. Left in place, the spaces hid the
+    trailing backslash and an indented fence inside a backslash-continued
+    string closed the block mid-string."""
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    def test_the_indented_fence_stays_inside_the_string(self, chunk_size):
+        code = "s = 'a\\\n   ```b'\nprint(s)"
+        segments, _ = parse(f"```python\n{code}\n```\n", chunk_size)
+
+        compile(code, "<continued>", "exec")
+        assert code_of(segments) == [code]

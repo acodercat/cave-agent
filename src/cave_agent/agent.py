@@ -478,14 +478,12 @@ class CaveAgent:
             )
 
         self.compactor = compactor or Compactor(model, context_window=context_window)
-        if self.compactor.output_reserve is None:
-            # The reserve holds room for *this agent's* next completion, but a
-            # Compactor resolves it from its own model — which, in the
-            # documented `Compactor(model=cheap_summarizer)` setup, is the
-            # summarizer. A summarizer declaring 1024 against an agent
-            # generating 8192 left the threshold ~7k too high, so compaction
-            # returned a prompt that still overran the window.
-            self.compactor.output_reserve = getattr(model, "max_output_tokens", None)
+        # The reserve must cover *this agent's* next completion; a supplied
+        # compactor's own model is often a cheap summarizer whose declaration
+        # is far smaller. Adoption, not assignment: writing output_reserve made
+        # the value look caller-pinned and mutated config shared with other
+        # agents (see Compactor.adopt_output_reserve).
+        self.compactor.adopt_output_reserve(getattr(model, "max_output_tokens", None))
 
         # Floor for persisted-output names. Names already handed to the model
         # in a resumed history are off limits — reusing one would re-point a
@@ -601,6 +599,12 @@ class CaveAgent:
             skills=self._skill_registry.describe_skills(),
             instructions=self.instructions,
             system_instructions=instructions,
+            # The default template no longer carries {current_time} — the time
+            # travels in a per-turn <system-reminder> so the system prompt
+            # stays byte-stable for prompt caching. Still passed, because
+            # str.format ignores unused kwargs and a caller's template copied
+            # from <=0.8 raises KeyError on every run without it.
+            current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         )
 
     async def _loop(self, state: _RunState) -> AsyncGenerator[Event, None]:
@@ -695,7 +699,14 @@ class CaveAgent:
             # turn is parsed *together with* it, and ask it to resume.
             state.output_recoveries += 1
             state.pending_text = turn.full
-            self.add_message(AssistantMessage(turn.text))
+            if turn.text:
+                # A reasoning model can spend the whole completion cap on
+                # thinking: finish_reason "length" with zero visible text.
+                # Recording that as an empty assistant turn poisoned history —
+                # several providers reject empty assistant content with a
+                # definite 400, which is never retried, so every later turn of
+                # the session failed.
+                self.add_message(AssistantMessage(turn.text))
             self.add_message(UserMessage(turn.resume_prompt))
             yield StatusEvent(
                 StatusType.OUTPUT_RECOVERY,
@@ -1040,10 +1051,19 @@ class CaveAgent:
                 SECURITY_ERROR_PROMPT.format(error=message),
             )
 
+        # A failure with no stdout must still read as a failure. The executor's
+        # catch-all can return an error-only result (the execution machinery
+        # itself raised, before the cell could produce output or a traceback);
+        # rendered as the empty-output placeholder, the model read "No output",
+        # assumed success, and answered from state the code never created.
+        if not result.success and not result.stdout and result.error is not None:
+            stdout = f"{type(result.error).__name__}: {result.error}"
+        else:
+            stdout = result.stdout or EMPTY_OUTPUT_PLACEHOLDER
         # Scrub lone surrogates from stdout (binary bytes printed by generated
         # code, half-decoded files) before it enters a message and the next
         # call's json.dumps would choke on it.
-        stdout = sanitize_surrogates(result.stdout or EMPTY_OUTPUT_PLACEHOLDER)
+        stdout = sanitize_surrogates(stdout)
         body, persisted_variable = await self._shape_output(stdout)
 
         return (

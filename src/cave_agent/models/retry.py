@@ -88,6 +88,13 @@ def is_retryable(error: Exception) -> bool:
     # occurrence while its sibling ``APIConnectionError`` was retried.
     if any(marker in type(error).__name__.lower() for marker in ("timeout", "connection")):
         return True
+    # The message tier is a last resort for SDK errors the tiers above missed,
+    # so it must not apply to Python's own programming errors: a TypeError for
+    # a misspelled kwarg that happens to be named `request_timeout` is
+    # deterministic, and retrying it spent the whole backoff budget before
+    # surfacing what was an immediate, permanent failure.
+    if isinstance(error, (TypeError, ValueError, AttributeError, LookupError, NameError)):
+        return False
     message = str(error).lower()
     if "connection" in message or "timeout" in message:
         return True

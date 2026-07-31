@@ -243,6 +243,20 @@ class BaseRuntime:
                         include_schema=False,
                         include_doc=False,
                     )
+            # Raw bindings get the same signature walk. Skill exports arrive
+            # this way — hidden from the prompt, but their instructions tell
+            # the model to construct the custom types those signatures name,
+            # and skipping the walk left `Order` in the instructions and a
+            # NameError in the namespace.
+            for _, value in prepared_bindings:
+                if callable(value):
+                    self._auto_inject_types_from_signature(value)
+                elif value is not None:
+                    self._try_auto_inject_type(
+                        type(value),
+                        include_schema=False,
+                        include_doc=False,
+                    )
 
     def update_variable(self, name: str, value: Any):
         """Replace a registered variable's value, found by its normalized name.
