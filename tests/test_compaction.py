@@ -7,7 +7,7 @@ from cave_agent._placeholders import build_persist_marker, strip_persisted_previ
 from cave_agent.compaction import CompactionState, Compactor
 from cave_agent.compaction.compactor import (
     _KEEP_RECENT_EXECUTION_RESULTS,
-    _drop_summary_pair,
+    _drop_summaries,
     _microcompact,
     migrate_legacy_summaries,
 )
@@ -288,7 +288,7 @@ class TestAcknowledgementProvenance:
             "OLD",
         )
 
-        kept = _drop_summary_pair([summary, genuine, *_make_messages(4)], 0)
+        kept = _drop_summaries([summary, genuine, *_make_messages(4)])
 
         assert genuine in kept
 
@@ -299,7 +299,7 @@ class TestAcknowledgementProvenance:
         )
         ack = SummaryAcknowledgementMessage(COMPACTION_SUMMARY_ASSISTANT_PLACEHOLDER)
 
-        kept = _drop_summary_pair([summary, ack, *_make_messages(4)], 0)
+        kept = _drop_summaries([summary, ack, *_make_messages(4)])
 
         assert ack not in kept
 
@@ -961,3 +961,84 @@ class TestUnusableSummariesAreRejected:
             await compactor.summarize([UserMessage(f"m{i}") for i in range(24)])
 
         assert compactor.state.should_skip()
+
+
+class TestSummaryRequestSizingIsFloored:
+    """`_fold_summary` splits until a request fits, but splitting cannot shrink
+    a request's fixed part. An unfloored limit therefore made *every* request
+    too large, and the bisection ran to single characters — issuing a real
+    model call at each of thousands of leaves."""
+
+    async def test_a_reserve_at_the_window_does_not_bisect_forever(self):
+        model = SummaryModel()
+        compactor = Compactor(model, context_window=8192, output_reserve=8192)
+
+        await compactor._fold_summary(_make_messages(8), "prior summary")
+
+        assert len(model.prompts) < 10
+
+    async def test_a_reserve_above_the_window_does_not_bisect_forever(self):
+        model = SummaryModel()
+        compactor = Compactor(model, context_window=4096, output_reserve=99_999)
+
+        await compactor._fold_summary(_make_messages(8), None)
+
+        assert len(model.prompts) < 10
+
+
+class TestMicrocompactWindowCountsEveryResult:
+    """The keep-window is 'the most recent N execution results'. Measuring it
+    over only the *unfloored* ones made an already-floored result invisible to
+    it, so a run whose recent results were preview-less persist markers kept
+    the six oldest and largest instead — and the cheap tier reclaimed nothing.
+    """
+
+    @staticmethod
+    def _floored_marker() -> str:
+        marker = build_persist_marker("Y" * 90_000, 0, "_out_1")
+        assert strip_persisted_preview(marker) == marker, "expected an at-floor marker"
+        return marker
+
+    def test_old_results_are_cleared_when_newer_ones_are_already_floored(self):
+        old = [ExecutionResultMessage("X" * 5000) for _ in range(10)]
+        newer = [ExecutionResultMessage(self._floored_marker()) for _ in range(10)]
+
+        compacted = _microcompact(old + newer)
+
+        assert all(m.content == MICROCOMPACT_PLACEHOLDER for m in compacted[:10])
+
+    def test_the_newest_results_are_the_ones_kept(self):
+        results = _make_messages(4) + [
+            ExecutionResultMessage(self._floored_marker()) for _ in range(6)
+        ]
+
+        compacted = _microcompact(results)
+
+        assert compacted[-1].content == self._floored_marker()
+        assert all(
+            m.content == MICROCOMPACT_PLACEHOLDER
+            for m in compacted
+            if m.role == MessageRole.EXECUTION_RESULT and "<persisted-output>" not in m.content
+        )
+
+
+class TestEverySummaryIsDroppedBeforeReSummarizing:
+    """The newest summary subsumes its predecessors, so a straggler left in
+    place was transcribed into the new-turns block — the conversation
+    re-narrated as something that happened after its own recap."""
+
+    async def test_an_older_summary_does_not_reach_the_transcript(self):
+        model = SummaryModel()
+        compactor = Compactor(model, context_window=100_000)
+        history = [
+            SummaryMessage(COMPACTION_SUMMARY_USER_TEMPLATE.format(summary="OLDEST"), "OLDEST"),
+            SummaryAcknowledgementMessage(COMPACTION_SUMMARY_ASSISTANT_PLACEHOLDER),
+            SummaryMessage(COMPACTION_SUMMARY_USER_TEMPLATE.format(summary="NEWER"), "NEWER"),
+            SummaryAcknowledgementMessage(COMPACTION_SUMMARY_ASSISTANT_PLACEHOLDER),
+            *_make_messages(2),
+        ]
+
+        await compactor._summarize_with_llm(history)
+
+        (prompt,) = model.prompts
+        assert "OLDEST" not in prompt

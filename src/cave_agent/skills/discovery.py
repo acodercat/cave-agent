@@ -1,5 +1,6 @@
 import importlib.util
 import re
+import sys
 from pathlib import Path
 
 import yaml
@@ -159,10 +160,20 @@ class SkillDiscovery:
         if spec is None or spec.loader is None:
             raise cls.Error(f"Failed to load injection module: '{injection_path}'")
 
+        module = importlib.util.module_from_spec(spec)
+        # Registered before execution, and left registered afterwards, because
+        # anything that resolves a class back to its module looks it up here:
+        # ``dataclasses`` reads ``sys.modules[cls.__module__].__dict__`` to
+        # evaluate annotations, so an unregistered module made every skill
+        # combining ``from __future__ import annotations`` with ``@dataclass``
+        # die on ``'NoneType' object has no attribute '__dict__'`` — an error
+        # naming nothing near the cause. ``get_type_hints`` on a skill-defined
+        # class, which type auto-injection calls, needs it for the same reason.
+        sys.modules[spec.name] = module
         try:
-            module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
         except Exception as error:
+            del sys.modules[spec.name]
             raise cls.Error(
                 f"Error loading injection module '{injection_path}': {error}"
             ) from error

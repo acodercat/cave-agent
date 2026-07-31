@@ -288,8 +288,8 @@ class Compactor:
         """
         prior = _find_prior_summary(messages)
         if prior is not None:
-            index, prior_body = prior
-            entries = _summary_entries(_drop_summary_pair(messages, index))
+            _, prior_body = prior
+            entries = _summary_entries(_drop_summaries(messages))
             if not entries:
                 return prior_body
         else:
@@ -350,14 +350,18 @@ class Compactor:
         ]
 
     def _summary_request_too_large(self, request: list[dict[str, str]]) -> bool:
-        reserve = self.output_reserve
-        if reserve is None:
-            reserve = getattr(self.model, "max_output_tokens", None)
-        if reserve is None:
-            reserve = _UNCONFIGURED_OUTPUT_TOKENS_FALLBACK
-        limit = self.context_window - reserve
+        """Whether *request* must be split before it can be sent.
+
+        Bounded by :meth:`threshold` — the same "input that still leaves room
+        for the completion" quantity, since the completion here is the summary.
+        Computing the bound inline instead left it unfloored: a reserve at or
+        above the context window made *every* request too large, and since
+        splitting cannot shrink the request's fixed part, ``_fold_summary``
+        bisected to single characters and issued a real model call at each of
+        the thousands of leaves.
+        """
         count = self.token_estimator or default_token_estimate
-        return sum(count(message["content"]) for message in request) > limit
+        return sum(count(message["content"]) for message in request) > self.threshold()
 
 
 def _summary_entries(messages: list[Message]) -> list[Message]:
@@ -499,18 +503,31 @@ def _followed_by_legacy_ack(messages: list[Message], index: int) -> bool:
     )
 
 
-def _drop_summary_pair(messages: list[Message], index: int) -> list[Message]:
-    """Return *messages* without the summary at *index* and its paired ack.
+def _drop_summaries(messages: list[Message]) -> list[Message]:
+    """Return *messages* without any compaction summary or its paired ack.
 
-    The ack is dropped only when it is a :class:`SummaryAcknowledgementMessage`
+    Every summary, not just the newest one being updated: the newest subsumes
+    its predecessors, so an older straggler left behind was transcribed into
+    the new-turns block as a turn that happened *after* the summary — the
+    conversation re-narrated as something that followed its own recap. A
+    rebuild keeps at most one alive, but a rehydrated or hand-assembled
+    history can carry more.
+
+    An ack is dropped only when it is a :class:`SummaryAcknowledgementMessage`
     — this agent's own synthetic turn. Matching on its *text* deleted a genuine
     assistant message that happened to say the same thing, which is a
     completely ordinary thing for a model to say.
     """
-    skip = {index}
-    follower = index + 1
-    if follower < len(messages) and isinstance(messages[follower], SummaryAcknowledgementMessage):
-        skip.add(follower)
+    skip: set[int] = set()
+    for index, message in enumerate(messages):
+        if not isinstance(message, SummaryMessage):
+            continue
+        skip.add(index)
+        follower = index + 1
+        if follower < len(messages) and isinstance(
+            messages[follower], SummaryAcknowledgementMessage
+        ):
+            skip.add(follower)
     return [m for i, m in enumerate(messages) if i not in skip]
 
 
@@ -522,15 +539,17 @@ def _microcompact(messages: list[Message]) -> list[Message]:
     names the runtime variable still holding the full output; replacing it
     would strand data the model can no longer reach.
     """
-    indices = [
-        i
-        for i, msg in enumerate(messages)
-        if msg.role == MessageRole.EXECUTION_RESULT and not _is_microcompacted(msg.content)
-    ]
-    if len(indices) <= _KEEP_RECENT_EXECUTION_RESULTS:
+    # The keep-window is measured over *every* execution result, then narrowed
+    # to those still worth clearing. Measuring it over only the unfloored ones
+    # made an already-floored result invisible to the window, so a run whose
+    # recent results were all persist markers (which are born at their floor
+    # when the preview is disabled) kept the six *oldest*, largest results as
+    # if they were the recent ones — and the cheap tier reclaimed nothing.
+    results = [i for i, msg in enumerate(messages) if msg.role == MessageRole.EXECUTION_RESULT]
+    older = results[:-_KEEP_RECENT_EXECUTION_RESULTS]
+    to_clear = {i for i in older if not _is_microcompacted(messages[i].content)}
+    if not to_clear:
         return messages
-
-    to_clear = set(indices[:-_KEEP_RECENT_EXECUTION_RESULTS])
     result: list[Message] = []
     for i, msg in enumerate(messages):
         if i in to_clear:

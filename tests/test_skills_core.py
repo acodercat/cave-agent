@@ -697,3 +697,69 @@ class TestFunctionIsAsync:
 
         func = Function(async_func)
         assert func.is_async is True
+
+
+class TestInjectionModulesResolveTheirOwnClasses:
+    """An injection module was executed without ever being registered in
+    ``sys.modules``, so anything resolving a class back to its module failed:
+    ``dataclasses`` reads ``sys.modules[cls.__module__].__dict__`` to evaluate
+    annotations, and a skill combining ``from __future__ import annotations``
+    with ``@dataclass`` died on ``'NoneType' object has no attribute
+    '__dict__'`` — an error naming nothing near the cause.
+    """
+
+    @staticmethod
+    def _write_skill(directory: Path, name: str, injection: str) -> None:
+        skill_dir = directory / name
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: a test skill\n---\n\n# Body\n"
+        )
+        (skill_dir / "injection.py").write_text(injection)
+
+    def test_a_postponed_annotation_dataclass_loads(self, temp_dir):
+        self._write_skill(
+            Path(temp_dir),
+            "dataclass-skill",
+            "from __future__ import annotations\n"
+            "from dataclasses import dataclass\n"
+            "from cave_agent import Variable\n\n"
+            "@dataclass\n"
+            "class Point:\n"
+            "    x: int\n"
+            "    y: int\n\n"
+            '__exports__ = [Variable("origin", Point(0, 0))]\n',
+        )
+
+        (skill,) = SkillDiscovery.from_directory(Path(temp_dir))
+
+        assert [v.name for v in skill.variables] == ["origin"]
+
+    def test_get_type_hints_resolves_a_skill_defined_class(self, temp_dir):
+        """Type auto-injection calls it, and it needs the same registration."""
+        self._write_skill(
+            Path(temp_dir),
+            "hints-skill",
+            "from __future__ import annotations\n"
+            "from cave_agent import Function\n\n"
+            "class Payload:\n"
+            "    pass\n\n"
+            "def build() -> Payload:\n"
+            "    return Payload()\n\n"
+            "__exports__ = [Function(build)]\n",
+        )
+
+        (skill,) = SkillDiscovery.from_directory(Path(temp_dir))
+        runtime = IPythonRuntime(functions=list(skill.functions))
+
+        assert "Payload" in runtime._types
+
+    def test_a_failing_injection_module_is_not_left_registered(self, temp_dir):
+        import sys
+
+        self._write_skill(Path(temp_dir), "broken-skill", "raise RuntimeError('boom')\n")
+
+        with pytest.raises(SkillDiscovery.Error):
+            SkillDiscovery.from_directory(Path(temp_dir))
+
+        assert "skill_injection_broken-skill" not in sys.modules

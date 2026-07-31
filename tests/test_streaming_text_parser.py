@@ -755,3 +755,62 @@ class TestSingleLineStringsDoNotSwallowFences:
         segments, _ = parse("```python\nx = 'a\\\\'\n```\n", chunk_size)
 
         assert code_of(segments) == ["x = 'a\\\\'"]
+
+
+class TestAnEmptyFenceIsNotTheFirstCodeBlock:
+    """The agent stops streaming at the first *complete* block and runs it.
+
+    An empty fence has nothing to run, so completing on it stopped the stream
+    holding no code: the real block that followed was never parsed, and the
+    answer was recorded truncated at the empty one.
+    """
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    def test_the_block_after_an_empty_fence_is_the_one_returned(self, chunk_size):
+        segments, _ = parse(
+            "Let me start.\n```python\n```\nOops, real code:\n```python\nprint('run me')\n```",
+            chunk_size,
+        )
+
+        assert code_of(segments) == ["print('run me')"]
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    def test_the_empty_fence_survives_as_text(self, chunk_size):
+        """It is part of what the model wrote, and history records the turn."""
+        segments, _ = parse("a\n```python\n```\nb\n```python\nx = 1\n```", chunk_size)
+
+        assert text_of(segments) == "a\n```python\n```\nb\n"
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    def test_a_whitespace_only_fence_is_empty_too(self, chunk_size):
+        segments, _ = parse("```python\n   \n```\nthen:\n```python\ny = 2\n```", chunk_size)
+
+        assert code_of(segments) == ["y = 2"]
+
+
+class TestAnIndentedBlockIsRunnable:
+    """A closing fence is accepted with up to three leading spaces, so a
+    uniformly indented block closes — and ``strip()`` alone de-indented only
+    its first line, handing the model a SyntaxError for code it wrote right."""
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    def test_a_uniformly_indented_block_compiles(self, chunk_size):
+        segments, _ = parse("```python\n   x = 1\n   y = x + 1\n   print(y)\n   ```\n", chunk_size)
+
+        (code,) = code_of(segments)
+        compile(code, "<indented>", "exec")
+        assert code == "x = 1\ny = x + 1\nprint(y)"
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    def test_relative_indentation_is_preserved(self, chunk_size):
+        segments, _ = parse("```python\n  def f():\n      return 1\n  ```\n", chunk_size)
+
+        (code,) = code_of(segments)
+        compile(code, "<nested>", "exec")
+        assert code == "def f():\n    return 1"
+
+    @pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
+    def test_an_ordinary_block_is_untouched(self, chunk_size):
+        segments, _ = parse("```python\ndef f():\n    return 1\n```\n", chunk_size)
+
+        assert code_of(segments) == ["def f():\n    return 1"]

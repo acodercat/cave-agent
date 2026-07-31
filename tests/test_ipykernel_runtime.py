@@ -14,6 +14,7 @@ from cave_agent.runtime import (
     Type,
     Variable,
 )
+from cave_agent.runtime.executor import RuntimeExecutionError
 from cave_agent.security import FunctionRule, ImportRule, SecurityChecker
 
 
@@ -2309,3 +2310,200 @@ class TestOneLoopAtATime:
         finally:
             thread.join(timeout=15)
             asyncio.run(rt.stop())
+
+
+class TestPartialOutputSurvivesATimeout:
+    """`_collect_result` accumulated into a frame-local list, and `_iopub_for`
+    raises its silence timeout from inside the loop — so the list died with the
+    frame. A cell that printed progress and then stalled handed the model
+    nothing but the timeout message, contradicting the partial-content
+    preservation applied everywhere else.
+    """
+
+    async def test_lines_printed_before_the_stall_reach_the_model(self):
+        rt = IPyKernelRuntime(iopub_timeout=3)
+        try:
+            result = await rt.execute(
+                "import time\n"
+                "for i in range(5):\n"
+                "    print(f'progress {i}', flush=True)\n"
+                "time.sleep(20)\n"
+            )
+
+            assert isinstance(result.error, TimeoutError)
+            for i in range(5):
+                assert f"progress {i}" in result.stdout
+            assert "TimeoutError" in result.stdout
+        finally:
+            await rt.stop()
+
+    async def test_a_traceback_published_before_the_stall_is_kept(self):
+        rt = IPyKernelRuntime(iopub_timeout=3)
+        try:
+            result = await rt.execute(
+                "import time\n"
+                "try:\n"
+                "    raise ValueError('the real cause')\n"
+                "except ValueError as e:\n"
+                "    print('caught:', e, flush=True)\n"
+                "time.sleep(20)\n"
+            )
+
+            assert "the real cause" in result.stdout
+        finally:
+            await rt.stop()
+
+
+class TestKernelResourceHygiene:
+    """The in-process backend disables history and the output cache on purpose;
+    the kernel path had no equivalent, so every cell ending in an expression
+    pinned its value in ``Out[n]`` / ``_`` — ``del df`` freed nothing and an
+    isolated kernel's memory only grew — plus a HistoryManager whose
+    SQLite-holding thread nothing here ever reads back."""
+
+    async def test_expression_results_do_not_accumulate(self):
+        """Bounded, not zero: IPython keeps the single most recent execution
+        result, which the next cell displaces. What `Out[n]` added was
+        *accumulation* — one live reference per cell, for the kernel's life.
+        """
+        rt = IPyKernelRuntime()
+        try:
+            for i in range(5):
+                await rt.execute(f"big{i} = list(range(100_000))\nbig{i}")
+            result = await rt.execute(
+                "\n".join(f"del big{i}" for i in range(5))
+                + "\nimport gc; gc.collect()\n"
+                + "print(sum(1 for o in gc.get_objects() "
+                "if isinstance(o, list) and len(o) == 100_000))"
+            )
+
+            assert result.stdout.strip() == "1"
+        finally:
+            await rt.stop()
+
+    async def test_the_last_result_is_released_by_the_next_cell(self):
+        rt = IPyKernelRuntime()
+        try:
+            await rt.execute("big = list(range(100_000))\nbig")
+            await rt.execute("del big")
+            result = await rt.execute(
+                "import gc; gc.collect()\n"
+                "print(sum(1 for o in gc.get_objects() "
+                "if isinstance(o, list) and len(o) == 100_000))"
+            )
+
+            assert result.stdout.strip() == "0"
+        finally:
+            await rt.stop()
+
+    async def test_the_output_cache_and_history_are_disabled(self):
+        rt = IPyKernelRuntime()
+        try:
+            result = await rt.execute(
+                "ip = get_ipython()\n"
+                "print('cache_size', ip.cache_size)\n"
+                "print('history', ip.history_manager.enabled)\n"
+                "print('out', len(Out))\n"
+            )
+
+            assert "cache_size 0" in result.stdout
+            assert "history False" in result.stdout
+            assert "out 0" in result.stdout
+        finally:
+            await rt.stop()
+
+
+class TestInternalRequestFailureIsRecorded:
+    """`_request_reply`'s reclaim bookkeeping must survive cancellation.
+
+    Raising the caller's cancellation before recording `_recovering` dropped
+    the one fact that matters: the kernel is still running the wedged cell.
+    `_admitted()` then handed the channel to the next request — exactly what
+    `_abandon` exists to prevent, and what every other `_abandon` caller
+    records.
+    """
+
+    @staticmethod
+    def _wedged_executor():
+        from cave_agent.runtime.ipykernel_executor import IPyKernelExecutor
+
+        executor = IPyKernelExecutor()
+
+        async def never_idle(msg_id):
+            raise TimeoutError("iopub silence")
+
+        async def unreclaimed(msg_id):
+            return False, None
+
+        executor._drain_until_idle = never_idle
+        executor._abandon = unreclaimed
+        return executor
+
+    async def test_an_unreclaimed_kernel_is_recorded_when_not_cancelled(self):
+        executor = self._wedged_executor()
+
+        with pytest.raises(RuntimeExecutionError):
+            await executor._request_reply("msg-1", "a namespace read")
+
+        assert executor._recovering is True
+
+    async def test_an_unreclaimed_kernel_is_recorded_when_cancelled(self):
+        executor = self._wedged_executor()
+
+        async def run():
+            await executor._request_reply("msg-1", "a namespace read")
+
+        task = asyncio.ensure_future(run())
+        await asyncio.sleep(0)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, RuntimeExecutionError):
+            await task
+
+        assert executor._recovering is True, (
+            "a cancelled caller still leaves the kernel running its wedged cell"
+        )
+
+
+class TestSilentRequestsUseAnAllowList:
+    """Only `ok` is success. Rejecting just `error` let `aborted` through — the
+    status ipykernel gives a shell request queued when an interrupt aborts the
+    batch, which `interrupt()` being public and lock-free makes reachable. A
+    flushed injection that never ran was then recorded as landed, so the model
+    got a bare NameError for a name `describe_functions()` still advertised.
+    """
+
+    @staticmethod
+    def _executor_replying(status):
+        from types import SimpleNamespace
+
+        from cave_agent.runtime.ipykernel_executor import IPyKernelExecutor
+
+        executor = IPyKernelExecutor()
+        executor._kernel_client = SimpleNamespace(execute=lambda code, silent=False: "msg-1")
+
+        async def reply(msg_id, operation):
+            return {"content": {"status": status}}
+
+        executor._request_reply = reply
+        return executor
+
+    @pytest.mark.parametrize("status", ["aborted", "error", "unexpected-future-status"])
+    async def test_a_non_ok_status_raises(self, status):
+        executor = self._executor_replying(status)
+
+        with pytest.raises(RuntimeExecutionError):
+            await executor._execute_silent("x = 1")
+
+    async def test_ok_succeeds(self):
+        executor = self._executor_replying("ok")
+
+        await executor._execute_silent("x = 1")
+
+    async def test_the_failure_is_typed_not_a_bare_runtime_error(self):
+        """It escapes through `start()`, which the base envelope does not wrap,
+        so an untyped raise here bypasses the runtime failure taxonomy and ends
+        a run as INTERNAL_ERROR for a kernel that merely aborted."""
+        executor = self._executor_replying("aborted")
+
+        with pytest.raises(RuntimeExecutionError):
+            await executor._execute_silent("x = 1")

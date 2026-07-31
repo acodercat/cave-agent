@@ -1093,3 +1093,79 @@ class TestRegistrationDuringReset:
 
         assert "late_resource" in runtime.describe_variables()
         assert await runtime.retrieve("late_resource") == 42
+
+
+class TestGenericOriginsAreInjected:
+    """Walking a hint's arguments without considering its *origin* left the
+    generic's own class uninjected, while the prompt still advertised it — so
+    generated code that used the name got a NameError."""
+
+    def test_a_custom_generic_injects_its_origin(self):
+        class Cache(dict):
+            pass
+
+        def get_cache() -> Cache[str]: ...
+
+        runtime = IPythonRuntime(functions=[Function(get_cache)])
+
+        assert list(runtime._types) == ["Cache"]
+
+    async def test_the_injected_origin_is_usable_in_generated_code(self):
+        class Registry(dict):
+            pass
+
+        def build() -> Registry[str]: ...
+
+        runtime = IPythonRuntime(functions=[Function(build)])
+        result = await runtime.execute("made = Registry(a=1)\nprint(type(made).__name__)")
+
+        assert result.success
+        assert "Registry" in result.stdout
+
+    def test_a_builtin_generic_origin_is_not_injected(self):
+        def counts() -> dict[str, int]: ...
+
+        assert list(IPythonRuntime(functions=[Function(counts)])._types) == []
+
+
+class TestTypingConstructsAreNotUserTypes:
+    """`typing.Any` is a class since 3.11 and `get_origin(int | None)` is
+    `types.UnionType`, so both were injected as if the caller had defined
+    them — and since names are claimed across every registry, the resulting
+    `Any` entry then rejected the caller's own `Variable("Any", …)`."""
+
+    def test_any_is_not_registered_as_a_type(self):
+        from typing import Any
+
+        def handle(x: Any) -> Any: ...
+
+        assert list(IPythonRuntime(functions=[Function(handle)])._types) == []
+
+    def test_a_pep604_union_does_not_register_its_origin(self):
+        def maybe() -> int | None: ...
+
+        assert list(IPythonRuntime(functions=[Function(maybe)])._types) == []
+
+    def test_an_annotation_does_not_block_a_later_registration(self):
+        from typing import Any
+
+        def handle(x: Any) -> Any: ...
+
+        runtime = IPythonRuntime(functions=[Function(handle)])
+        runtime.inject_variable(Variable("Any", 1))
+
+        assert runtime._variables["Any"].value == 1
+
+    def test_a_user_class_defined_by_exec_is_still_injected(self):
+        """It reports ``__module__ == "builtins"``, so excluding that module
+        wholesale — rather than the specific builtin types — silently dropped
+        genuine user classes."""
+        namespace = {}
+        exec(
+            "class Payload:\n    pass\ndef consume(value: Payload) -> Payload:\n    return value\n",
+            namespace,
+        )
+
+        runtime = IPythonRuntime(functions=[Function(namespace["consume"])])
+
+        assert list(runtime._types) == ["Payload"]

@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import inspect
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any, Self
 
@@ -85,6 +85,9 @@ class StreamResponse:
         self.finish_reason: str | None = None
         self.thinking: str = ""
         self.refusal: str = ""
+        # Set by a consumer that measures silence, to be told when a pause is
+        # this stream's own retry backoff rather than the provider stalling.
+        self.on_backoff: Callable[[float], None] | None = None
         self._response: Any = None
         self._iterator: AsyncIterator[Any] | None = None
         self._received_output: bool = False
@@ -143,7 +146,16 @@ class StreamResponse:
                 # socket also dies on close into a terminal one.
                 with contextlib.suppress(ModelError):
                     await self.aclose()
-                await asyncio.sleep(get_retry_delay(self._connect_attempts, error))
+                delay = get_retry_delay(self._connect_attempts, error)
+                # Announced before sleeping so an idle watchdog can tell this
+                # apart from the provider going quiet. It is the same silence
+                # on the wire, but one is a wait we chose — often a server's own
+                # `Retry-After` — and counting it against the idle budget let a
+                # 30s backoff eat a 120s window and end the run as a stall with
+                # retries still unspent.
+                if self.on_backoff is not None:
+                    self.on_backoff(delay)
+                await asyncio.sleep(delay)
                 continue
             try:
                 refusal_length = len(self.refusal)
@@ -408,10 +420,21 @@ async def stream_with_idle_timeout[StreamT](
             yield item
         return
 
+    loop = asyncio.get_running_loop()
     iterator = stream.__aiter__()
+    # A stream that retries a failed connection sleeps *inside* `__anext__`,
+    # which this window wraps — so without the hook the watchdog was timing the
+    # client's own deliberate backoff. Honouring `Retry-After: 30` spent a
+    # quarter of the default window per attempt, and the run died as a stall
+    # with retries still unspent. Announced waits push the deadline out instead.
+    retrying = stream if isinstance(stream, StreamResponse) else None
     while True:
         try:
-            async with asyncio.timeout(idle_timeout):
+            async with asyncio.timeout(idle_timeout) as window:
+                if retrying is not None:
+                    retrying.on_backoff = lambda seconds: window.reschedule(
+                        loop.time() + seconds + idle_timeout
+                    )
                 item = await iterator.__anext__()
         except StopAsyncIteration:
             return

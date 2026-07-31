@@ -5,6 +5,7 @@
 6. Thinking/reasoning capture (surfaced, never silently dropped).
 """
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -31,6 +32,7 @@ from cave_agent.models import (
     is_context_length_exceeded,
 )
 from cave_agent.models.base import Model as BaseModel
+from cave_agent.models.base import StreamStalledError, stream_with_idle_timeout
 from cave_agent.models.errors import classify_provider_error
 from cave_agent.models.retry import is_retryable, with_retry_typed
 from cave_agent.runtime import IPythonRuntime
@@ -608,3 +610,163 @@ class TestRetryReadsWhatTheProviderSent:
         assert not is_retryable(
             openai.BadRequestError("bad timeout param", response=response, body=None)
         )
+
+
+class TestTheIdleWatchdogIgnoresDeliberateBackoff:
+    """`StreamResponse` retries a failed connection by sleeping *inside*
+    `__anext__`, which the watchdog wraps. Counting that against the idle
+    budget meant a server's own `Retry-After: 30` spent a quarter of the
+    default 120s window per attempt, and the run ended as a stall with retries
+    still unspent — the watchdog policing the client's own patience.
+    """
+
+    class _FlakyStream(StreamResponse):
+        """Fails to connect *failures* times, then delivers one chunk."""
+
+        def __init__(self, failures: int):
+            super().__init__()
+            self.remaining = failures
+            self.attempts = 0
+
+        async def _open_stream(self):
+            self.attempts += 1
+            if self.remaining > 0:
+                self.remaining -= 1
+                raise ConnectionError("connection reset by peer")
+
+            async def chunks():
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(content="hi", reasoning_content=None),
+                            finish_reason="stop",
+                        )
+                    ],
+                    usage=None,
+                )
+
+            return chunks()
+
+    @pytest.fixture
+    def slow_backoff(self, monkeypatch):
+        """A backoff longer than the idle window, as `Retry-After` often is."""
+        monkeypatch.setattr(
+            "cave_agent.models.base.get_retry_delay", lambda attempt, error=None: 0.3
+        )
+
+    async def test_a_retry_backoff_does_not_trip_the_watchdog(self, slow_backoff):
+        stream = self._FlakyStream(failures=2)
+
+        received = [item async for item in stream_with_idle_timeout(stream, idle_timeout=0.1)]
+
+        assert stream.attempts == 3, "the retries must actually have happened"
+        assert [d.content for d in received] == ["hi"]
+
+    async def test_a_real_stall_still_trips(self):
+        class Stalled(StreamResponse):
+            async def _open_stream(self):
+                async def chunks():
+                    await asyncio.sleep(10)
+                    yield None
+
+                return chunks()
+
+        with pytest.raises(StreamStalledError):
+            async for _ in stream_with_idle_timeout(Stalled(), idle_timeout=0.05):
+                pass
+
+    async def test_the_window_still_applies_after_the_backoff(self, slow_backoff):
+        """The extension covers the announced wait only — a stall once the
+        connection succeeds must still be caught."""
+
+        class RetryThenStall(StreamResponse):
+            def __init__(self):
+                super().__init__()
+                self.opened = False
+
+            async def _open_stream(self):
+                if not self.opened:
+                    self.opened = True
+                    raise ConnectionError("connection reset by peer")
+
+                async def chunks():
+                    await asyncio.sleep(10)
+                    yield None
+
+                return chunks()
+
+        stream = RetryThenStall()
+        with pytest.raises(StreamStalledError):
+            async for _ in stream_with_idle_timeout(stream, idle_timeout=0.1):
+                pass
+
+        assert stream.opened
+
+
+class TestTheOutputReserveTracksTheGeneratingModel:
+    """The reserve holds room for the *agent's* next completion, but a
+    Compactor resolves it from its own model — which, in the documented
+    `Compactor(model=cheap_summarizer)` setup, is the summarizer. A summarizer
+    declaring 1024 against an agent generating 8192 left the threshold ~7k too
+    high, so compaction returned a prompt that still overran the window."""
+
+    class _Declaring(Model):
+        def __init__(self, max_output_tokens):
+            self.max_output_tokens = max_output_tokens
+
+        async def _complete(self, messages):
+            raise NotImplementedError
+
+        def stream(self, messages):
+            raise NotImplementedError
+
+    def test_a_supplied_compactor_adopts_the_agents_model(self):
+        agent = CaveAgent(
+            model=self._Declaring(8192),
+            compactor=Compactor(self._Declaring(1024), context_window=100_000),
+        )
+
+        assert agent.compactor.output_reserve == 8192
+
+    def test_an_explicit_reserve_still_wins(self):
+        agent = CaveAgent(
+            model=self._Declaring(8192),
+            compactor=Compactor(self._Declaring(1024), context_window=100_000, output_reserve=3000),
+        )
+
+        assert agent.compactor.output_reserve == 3000
+
+    def test_a_silent_agent_model_leaves_the_fallback_in_place(self):
+        agent = CaveAgent(
+            model=self._Declaring(None),
+            compactor=Compactor(self._Declaring(None), context_window=100_000),
+        )
+
+        assert agent.compactor.output_reserve is None
+
+
+class TestLiteLLMCarriesItsDeclaredCap:
+    """`max_tokens=None` passed explicitly is a *present* key, so `setdefault`
+    kept the None and dropped the declaration — leaving `max_output_tokens`
+    unset and the compactor sizing its threshold against a fallback."""
+
+    def test_an_explicit_none_does_not_defeat_the_declaration(self):
+        from cave_agent.models import LiteLLMModel
+
+        model = LiteLLMModel(model_id="gpt-4o", max_output_tokens=4096, max_tokens=None)
+
+        assert model.max_output_tokens == 4096
+        assert model.kwargs["max_tokens"] == 4096
+
+    def test_an_absent_kwarg_still_adopts_the_declaration(self):
+        from cave_agent.models import LiteLLMModel
+
+        model = LiteLLMModel(model_id="gpt-4o", max_output_tokens=4096)
+
+        assert model.kwargs["max_tokens"] == 4096
+
+    def test_a_conflicting_pair_is_still_rejected(self):
+        from cave_agent.models import LiteLLMModel
+
+        with pytest.raises(ValueError):
+            LiteLLMModel(model_id="gpt-4o", max_output_tokens=4096, max_tokens=2048)

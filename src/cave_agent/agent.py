@@ -478,6 +478,14 @@ class CaveAgent:
             )
 
         self.compactor = compactor or Compactor(model, context_window=context_window)
+        if self.compactor.output_reserve is None:
+            # The reserve holds room for *this agent's* next completion, but a
+            # Compactor resolves it from its own model — which, in the
+            # documented `Compactor(model=cheap_summarizer)` setup, is the
+            # summarizer. A summarizer declaring 1024 against an agent
+            # generating 8192 left the threshold ~7k too high, so compaction
+            # returned a prompt that still overran the window.
+            self.compactor.output_reserve = getattr(model, "max_output_tokens", None)
 
         # Floor for persisted-output names. Names already handed to the model
         # in a resumed history are off limits — reusing one would re-point a

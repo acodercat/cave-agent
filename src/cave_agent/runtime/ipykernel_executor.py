@@ -27,6 +27,18 @@ from .executor import (
 
 logger = logging.getLogger(__name__)
 
+# Launch flags for the kernel subprocess, mirroring what `create_ipython_config`
+# does for the in-process backend. Without them the kernel keeps every cell's
+# expression value alive in `Out[n]` / `_` / `__`, so `del df` frees nothing and
+# an isolated kernel's memory only grows — and it builds a HistoryManager whose
+# SQLite-holding thread nothing here ever reads back.
+_KERNEL_ARGUMENTS = [
+    "--HistoryAccessor.enabled=False",
+    "--HistoryManager.enabled=False",
+    "--InteractiveShell.cache_size=0",
+    "--InteractiveShell.history_length=0",
+]
+
 # Timeout constants (seconds)
 _KERNEL_READY_TIMEOUT = 60.0
 _SHELL_REPLY_TIMEOUT = 10.0
@@ -411,7 +423,7 @@ class IPyKernelExecutor:
             self._orphaned = False
             self._km = AsyncKernelManager(kernel_name="python3")
         try:
-            await self._km.start_kernel()
+            await self._km.start_kernel(extra_arguments=_KERNEL_ARGUMENTS)
             self._kernel_client = self._km.client()
             self._kernel_client.start_channels()
 
@@ -813,8 +825,9 @@ class IPyKernelExecutor:
             async with self._admitted():
                 await self._flush_injections()
                 msg_id = self._kernel_client.execute(code)
+                stdout_parts: list[str] = []
                 try:
-                    result = await self._collect_result(msg_id)
+                    result = await self._collect_result(msg_id, stdout_parts)
                     cell_idle = True
                     _, reap_cancellation = await _finish_despite_cancellation(
                         self._reap_shell_reply(msg_id),
@@ -834,9 +847,10 @@ class IPyKernelExecutor:
                         f"{self._iopub_timeout}s. Print progress periodically, or raise "
                         "iopub_timeout on the runtime."
                     )
+                    stdout_parts.append(f"\nTimeoutError: {message}")
                     result = ExecutionResult(
                         error=TimeoutError(message),
-                        stdout=f"TimeoutError: {message}",
+                        stdout="".join(stdout_parts),
                         state_lost=restart_required,
                     )
                 except asyncio.CancelledError as error:
@@ -1028,10 +1042,17 @@ class IPyKernelExecutor:
             (reclaimed, reply), cancellation = await _finish_despite_cancellation(
                 self._abandon(msg_id)
             )
+            if not reclaimed:
+                # Recorded before the cancellation is re-raised, not after: an
+                # unreclaimed kernel is still running the wedged cell whether
+                # or not this caller was cancelled. Raising first dropped the
+                # flag on that path, so `_admitted()` handed the channel to the
+                # next request — which is exactly what `_abandon` exists to
+                # prevent. Every other caller of `_abandon` records it.
+                self._recovering = True
             if cancellation is not None:
                 raise cancellation from error
             if not reclaimed:
-                self._recovering = True
                 raise RuntimeExecutionError(
                     f"Kernel did not become idle after {operation}; "
                     "the runtime process must be restarted"
@@ -1147,18 +1168,37 @@ class IPyKernelExecutor:
                     self._restore_injections[name] = code
 
     async def _execute_silent(self, code: str) -> None:
-        """Run *code* on the kernel, discard output, raise on error."""
+        """Run *code* on the kernel, discard output, raise unless it succeeded.
+
+        Only ``ok`` is success. Rejecting just ``error`` let ``aborted``
+        through — the status ipykernel gives a shell request that was queued
+        when an interrupt aborted the batch, which `interrupt()` being public
+        and lock-free makes reachable. A flushed injection that never ran was
+        then recorded as landed, so the model got a bare ``NameError`` for a
+        name `describe_functions()` still advertised, and an aborted setup left
+        the executor started with no codec installed.
+        """
         msg_id = self._kernel_client.execute(code, silent=True)
         reply = await self._request_reply(msg_id, "a silent setup request")
-        if reply["content"].get("status") == "error":
-            raise RuntimeError(
-                f"Kernel setup error: {reply['content'].get('ename', 'Unknown')}: "
-                f"{reply['content'].get('evalue', '')}"
+        status = reply["content"].get("status")
+        if status != "ok":
+            detail = (
+                f"{reply['content'].get('ename', 'Unknown')}: {reply['content'].get('evalue', '')}"
+                if status == "error"
+                else f"request {status}"
             )
+            raise RuntimeExecutionError(f"Kernel setup error: {detail}")
 
-    async def _collect_result(self, msg_id: str) -> ExecutionResult:
-        """Read IOPub messages for *msg_id* and build an ``ExecutionResult``."""
-        stdout_parts: list[str] = []
+    async def _collect_result(self, msg_id: str, stdout_parts: list[str]) -> ExecutionResult:
+        """Read IOPub messages for *msg_id* into *stdout_parts*, and build a result.
+
+        The accumulator belongs to the caller because this coroutine does not
+        always return: `_iopub_for` raises its silence timeout from inside the
+        loop, and a list local to this frame died with it. A cell that printed
+        four hundred progress lines and then stalled — including a traceback
+        published just before the stall — handed the model nothing but the
+        timeout message.
+        """
         error: BaseException | None = None
 
         async for msg in self._iopub_for(msg_id):

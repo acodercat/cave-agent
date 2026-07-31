@@ -1,4 +1,5 @@
 import io
+import textwrap
 import tokenize
 from enum import Enum
 
@@ -119,8 +120,8 @@ class StreamingTextParser:
         # been folded into the buffer. Emitting before and after that fold
         # duplicated the whole block when the stream ended on one or two
         # possible closing backticks.
-        if self.in_code_block and self.code_buffer:
-            segments.append(Segment(SegmentType.CODE, self.code_buffer.strip()))
+        if self.in_code_block and self.code_buffer.strip():
+            segments.append(Segment(SegmentType.CODE, self._finished_code()))
 
         # Flush any remaining text buffer
         if self.text_buffer:
@@ -144,6 +145,8 @@ class StreamingTextParser:
         self.in_code_block = False
         self.first_code_block_completed = False
         self.remainder = ""
+        # The opening fence as written, replayed as text if the block is empty.
+        self._code_block_opening = ""
         # Number of leading spaces on the current code line. ``None`` once the
         # line contains code or exceeds Markdown's three-space fence indent.
         self._code_line_indent: int | None = 0
@@ -243,7 +246,7 @@ class StreamingTextParser:
         else:
             if char in ("\n", " ", "\r"):
                 # Valid code block start
-                self._enter_code_block()
+                self._enter_code_block(char)
                 # Don't add delimiter to code buffer
                 return []
             else:
@@ -281,11 +284,19 @@ class StreamingTextParser:
                     self.backtick_count = 0
                     return []
 
-                # Code block ends
-                segments = []
-                if self.code_buffer:
-                    segments.append(Segment(SegmentType.CODE, self.code_buffer.strip()))
+                if not self.code_buffer.strip():
+                    # An empty fence is not the block the agent is waiting for.
+                    # Completing on it stopped the stream with no code to run,
+                    # so the real block that followed was never parsed and the
+                    # answer was truncated at the empty one. Give the fence
+                    # back as text and keep looking.
                     self.code_buffer = ""
+                    self._exit_code_block()
+                    return [Segment(SegmentType.TEXT, self._code_block_opening + "```")]
+
+                # Code block ends
+                segments = [Segment(SegmentType.CODE, self._finished_code())]
+                self.code_buffer = ""
                 self._exit_code_block()
                 self.first_code_block_completed = True
                 return segments
@@ -343,6 +354,18 @@ class StreamingTextParser:
         line = self.code_buffer.rstrip("\r\n")
         return (len(line) - len(line.rstrip("\\"))) % 2 == 1
 
+    def _finished_code(self) -> str:
+        """The buffered block as runnable source.
+
+        A closing fence is accepted with up to three leading spaces, so a
+        uniformly indented block closes correctly — and ``strip()`` alone
+        de-indents only its first line, handing the model a
+        ``SyntaxError: unexpected indent`` for code it wrote correctly.
+        ``dedent`` removes the whole block's common prefix and is a no-op on
+        ordinary unindented code.
+        """
+        return textwrap.dedent(self.code_buffer).strip()
+
     def _append_code_character(self, char: str) -> None:
         """Append code while tracking whether a closing fence may start here."""
         self.code_buffer += char
@@ -353,12 +376,17 @@ class StreamingTextParser:
         else:
             self._code_line_indent = None
 
-    def _enter_code_block(self) -> None:
-        """Enter code block mode and reset temporary buffers."""
+    def _enter_code_block(self, delimiter: str) -> None:
+        """Enter code block mode and reset temporary buffers.
+
+        The opening is recorded verbatim so an empty fence can be handed back
+        as the text the model actually wrote.
+        """
         self.in_code_block = True
         self.mode = self.Mode.CODE
         self.language_match_buffer = ""
         self._code_line_indent = 0
+        self._code_block_opening = f"```{self.language_identifier}{delimiter}"
 
     def _exit_code_block(self) -> None:
         """Exit code block mode and reset counters."""

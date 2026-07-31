@@ -3,6 +3,7 @@ from collections.abc import Callable
 from dataclasses import MISSING, is_dataclass
 from dataclasses import fields as dataclass_fields
 from enum import Enum
+from types import UnionType
 from typing import Any, ForwardRef, Union, get_args, get_origin
 
 from pydantic import BaseModel
@@ -374,7 +375,12 @@ class TypeSchemaExtractor:
             args = get_args(type_hint)
 
             # Get a readable origin name
-            if origin is Union:
+            # `int | None` and `Optional[int]` mean the same thing but arrive
+            # as different origins — `types.UnionType` and `typing.Union` —
+            # and only the second was recognized, so PEP 604 annotations fell
+            # through to the generic branch and were shown to the model as
+            # `UnionType[int, None]`: not a type expression it can write back.
+            if origin is Union or origin is UnionType:
                 # Special handling for Optional (Union[X, None])
                 non_none_args = [a for a in args if a is not type(None)]
                 if len(non_none_args) == 1 and len(args) == 2:

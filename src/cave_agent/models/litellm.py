@@ -54,7 +54,11 @@ class LiteLLMModel(Model):
         if max_output_tokens is not None and wire_cap is not None and max_output_tokens != wire_cap:
             raise ValueError("max_output_tokens must match max_tokens when both are provided")
         if max_output_tokens is not None:
-            self.kwargs.setdefault("max_tokens", max_output_tokens)
+            # Assigned rather than `setdefault`: an explicit `max_tokens=None`
+            # in kwargs is a *present* key, so setdefault kept the None and
+            # dropped the declaration — leaving `max_output_tokens` None, and
+            # the compactor sizing its threshold against a fallback.
+            self.kwargs["max_tokens"] = max_output_tokens
         self.max_output_tokens = self.kwargs.get("max_tokens")
         self._stream_options_supported: bool | None = None
 

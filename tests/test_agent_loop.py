@@ -1947,3 +1947,58 @@ class TestProviderChunkShapes:
         events = [e async for e in agent.stream_events("q")]
 
         assert events[-1].stop_reason is StopReason.MODEL_ERROR
+
+
+class TestAnEmptyFenceDoesNotEndTheTurn:
+    """The agent stops at the first *complete* code block and runs it. An empty
+    fence has nothing to run, so completing on it stopped the stream holding no
+    code: the block that followed never ran, and the turn was recorded as an
+    answer truncated at the empty fence.
+    """
+
+    async def test_the_real_block_is_the_one_executed(self):
+        agent = CaveAgent(
+            model=FakeModel(
+                [
+                    "Let me start.\n```python\n```\nOops, real code:\n"
+                    "```python\nmarker = 'executed'\nprint(marker)\n```",
+                ]
+            ),
+            runtime=IPythonRuntime(),
+        )
+
+        response = await agent.run("go")
+
+        assert "executed" in "".join(
+            m.content for m in agent.messages if m.role == MessageRole.EXECUTION_RESULT
+        )
+        assert response.stop_reason is StopReason.COMPLETED
+
+    async def test_an_empty_fence_alone_is_an_answer_not_an_execution(self):
+        agent = CaveAgent(
+            model=FakeModel(["Nothing to run here.\n```python\n```"]),
+            runtime=IPythonRuntime(),
+        )
+
+        response = await agent.run("go")
+
+        assert response.stop_reason is StopReason.COMPLETED
+        assert not [m for m in agent.messages if m.role == MessageRole.CODE_EXECUTION]
+
+
+class TestAnIndentedBlockRuns:
+    """A closing fence is accepted with up to three leading spaces, so an
+    indented block closes — and stripping only its first line handed the model
+    a SyntaxError for code it wrote correctly."""
+
+    async def test_a_uniformly_indented_block_executes(self):
+        agent = CaveAgent(
+            model=FakeModel(["Here:\n```python\n   value = 6 * 7\n   print(value)\n   ```"]),
+            runtime=IPythonRuntime(),
+        )
+
+        await agent.run("go")
+
+        results = [m.content for m in agent.messages if m.role == MessageRole.EXECUTION_RESULT]
+        assert "42" in "".join(results)
+        assert "SyntaxError" not in "".join(results)

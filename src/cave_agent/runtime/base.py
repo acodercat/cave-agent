@@ -52,6 +52,18 @@ class BaseRuntime:
         }
     )
 
+    # Typing machinery is not a user's class, and enumerating it is hopeless:
+    # since 3.11 `typing.Any` *is* a class, so `f(x: Any)` registered a type
+    # named `Any` — which then blocked the caller's own `Variable("Any", …)`,
+    # since names are claimed across all registries — and `get_origin(int |
+    # None)` is `types.UnionType`, a class as well.
+    #
+    # Matched by module rather than by value, but only for these: `builtins`
+    # cannot join them, because a class defined by `exec`-ing source into a
+    # bare namespace reports `__module__ == "builtins"` and is a genuine user
+    # type. That is what `_BUILTIN_TYPES` above is still for.
+    _TYPING_MODULES = frozenset({"types", "typing", "typing_extensions", "collections.abc"})
+
     def __init__(
         self,
         executor: Any,
@@ -326,6 +338,8 @@ class BaseRuntime:
             return False
         if cls in self._BUILTIN_TYPES:
             return False
+        if getattr(cls, "__module__", None) in self._TYPING_MODULES:
+            return False
         # Skip types without proper names (lambdas, locals, etc.)
         if not hasattr(cls, "__name__") or cls.__name__.startswith("<"):
             return False
@@ -390,6 +404,12 @@ class BaseRuntime:
             return
         origin = get_origin(type_hint)
         if origin is not None:
+            # The origin is a candidate too, not just a container to look
+            # through: `Cache[str]` over a user's `class Cache(dict)` left
+            # `Cache` uninjected while the prompt still advertised it, so
+            # generated code using it got a NameError. Builtin origins fall
+            # out in `_is_injectable_type`.
+            self._process_type_for_injection(origin)
             for arg in get_args(type_hint):
                 if arg is not NoneType:
                     self._process_type_for_injection(arg)

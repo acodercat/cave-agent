@@ -213,3 +213,68 @@ class TestUsageTotalIsDerived:
         usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=99)
 
         assert Model._extract_token_usage(SimpleNamespace(usage=usage)).total_tokens == 99
+
+
+class TestNonLatinScriptsAreNotUnderCounted:
+    """Everything outside Latin and CJK used to fall through to the Latin rate.
+
+    Emoji were charged a quarter token each against a true cost near three, and
+    Cyrillic, Thai and Devanagari two to four times under — the unsafe
+    direction, and unlike the Python/JSON gap it was neither documented nor
+    pinned, so such a conversation sailed past the threshold into a rejected
+    prompt.
+    """
+
+    SAMPLES = {
+        "cyrillic": "Привет мир, это тестовое предложение на русском языке.",
+        "greek": "Γειά σου κόσμε, αυτή είναι μια δοκιμαστική πρόταση στα ελληνικά.",
+        "hebrew": "שלום עולם, זהו משפט בדיקה בעברית להערכת אסימונים.",
+        "arabic": "مرحبا بالعالم، هذه جملة اختبارية باللغة العربية لتقدير الرموز.",
+        "thai": "สวัสดีชาวโลก นี่คือประโยคทดสอบภาษาไทยสำหรับการประมาณโทเค็น",
+        "devanagari": "नमस्ते दुनिया, यह टोकन अनुमान के लिए एक परीक्षण वाक्य है।",
+        "bengali": "হ্যালো বিশ্ব, এটি টোকেন অনুমানের জন্য একটি পরীক্ষা।",
+        "tamil": "வணக்கம் உலகம், இது டோக்கன் மதிப்பீட்டுக்கான சோதனை.",
+        "armenian": "Բարև աշխարհ, սա թոքենների գնահատման փորձնական նախադասություն է:",
+        "georgian": "გამარჯობა მსოფლიო, ეს არის სატესტო წინადადება ტოკენების შესაფასებლად.",
+        "ethiopic": "ሰላም ዓለም ይህ የቶከን ግምት ሙከራ ዓረፍተ ነገር ነው።",
+        "cherokee": "ᎣᏏᏲ ᎡᎶᎯ ᎯᎠ ᎠᏓᏅᏖᏍᎬ ᎠᎪᎵᏰᏗ ᎨᏒᎢ.",
+        "myanmar": "မင်္ဂလာပါကမ္ဘာလောက၊ ဤသည်မှာ စမ်းသပ်မှုဖြစ်သည်။",
+        "tibetan": "བཀྲ་ཤིས་བདེ་ལེགས་འཛམ་གླིང་འདི་ནི་ཚོད་ལྟའི་ཚིག་གྲུབ་ཡིན།",
+        "emoji": "😀🎉🔥🚀💡" * 12,
+        "emoji_zwj": "👨‍👩‍👧‍👦🏳️‍🌈👩🏽‍💻" * 8,
+        "emoji_symbols": "⚡☀️✂️❤️★" * 12,
+    }
+
+    @pytest.mark.parametrize("script", sorted(SAMPLES))
+    @pytest.mark.parametrize("encoding", ["cl100k_base", "o200k_base"])
+    def test_never_under_counts_a_real_tokenizer(self, script, encoding):
+        tiktoken = pytest.importorskip("tiktoken")
+        text = self.SAMPLES[script]
+        actual = len(tiktoken.get_encoding(encoding).encode(text))
+
+        assert default_token_estimate(text) >= actual
+
+    @pytest.mark.parametrize("script", sorted(SAMPLES))
+    def test_does_not_over_count_enough_to_compact_early(self, script):
+        """Over-estimating is the safe direction, not a free one: a rate that
+        charged every non-Latin script the dense end would bill Russian six
+        times over and compact those conversations long before they need it."""
+        tiktoken = pytest.importorskip("tiktoken")
+        text = self.SAMPLES[script]
+        actual = len(tiktoken.get_encoding("cl100k_base").encode(text))
+
+        assert default_token_estimate(text) <= actual * 3
+
+    def test_the_rate_classes_are_disjoint(self):
+        """Each class's matches are subtracted from the default-rate remainder,
+        so a character in two classes is charged twice and the remainder goes
+        negative."""
+        from itertools import combinations
+
+        from cave_agent.compaction.tokens import _RATED_CLASSES
+
+        for (_, first), (_, second) in combinations(_RATED_CLASSES, 2):
+            overlapping = [
+                hex(cp) for cp in range(0x1FBFF) if first.match(chr(cp)) and second.match(chr(cp))
+            ]
+            assert not overlapping
