@@ -5,18 +5,16 @@ Tests all skill features through natural language interactions:
 - Skill activation
 - Injection (functions, variables, types)
 """
-import pytest
-import pytest_asyncio
+
 from pathlib import Path
 
+import pytest
+import pytest_asyncio
+
 from cave_agent import CaveAgent
+from cave_agent.runtime import IPyKernelRuntime, IPythonRuntime, Variable
 from cave_agent.skills import SkillDiscovery
-from cave_agent.runtime import IPythonRuntime, IPyKernelRuntime, Variable
 
-
-# =============================================================================
-# Fixtures
-# =============================================================================
 
 @pytest.fixture
 def skills_dir():
@@ -46,17 +44,8 @@ def agent_with_skills(model, skills_dir):
     )
 
     skills = SkillDiscovery.from_directory(skills_dir)
-    return CaveAgent(
-        model=model,
-        skills=skills,
-        runtime=runtime,
-        max_steps=10
-    )
+    return CaveAgent(model=model, skills=skills, runtime=runtime, max_steps=10)
 
-
-# =============================================================================
-# Skill Activation Tests
-# =============================================================================
 
 class TestSkillActivation:
     """Test skill activation through agent.run()."""
@@ -68,15 +57,11 @@ class TestSkillActivation:
             "Activate the 'data-analysis' skill and store the instructions in a variable called 'instructions'."
         )
 
-        instructions = await agent_with_skills.runtime.retrieve('instructions')
+        instructions = await agent_with_skills.runtime.retrieve("instructions")
         assert instructions is not None
         assert "Data Analysis Skill" in instructions
         assert "calculate_stats" in instructions
 
-
-# =============================================================================
-# Injected Function Tests
-# =============================================================================
 
 class TestInjectedFunctions:
     """Test using injected functions through agent.run()."""
@@ -89,12 +74,12 @@ class TestInjectedFunctions:
             "and store the result in a variable called 'stats'."
         )
 
-        stats = await agent_with_skills.runtime.retrieve('stats')
+        stats = await agent_with_skills.runtime.retrieve("stats")
         assert stats is not None
-        assert stats['mean'] == 30.0
-        assert stats['median'] == 30
-        assert stats['min'] == 10
-        assert stats['max'] == 50
+        assert stats["mean"] == 30.0
+        assert stats["median"] == 30
+        assert stats["min"] == 10
+        assert stats["max"] == 50
 
     @pytest.mark.asyncio
     async def test_find_outliers(self, agent_with_skills):
@@ -104,14 +89,10 @@ class TestInjectedFunctions:
             "Store the result in a variable called 'outliers'."
         )
 
-        outliers = await agent_with_skills.runtime.retrieve('outliers')
+        outliers = await agent_with_skills.runtime.retrieve("outliers")
         assert outliers is not None
         assert 100 in outliers
 
-
-# =============================================================================
-# Injected Variable Tests
-# =============================================================================
 
 class TestInjectedVariables:
     """Test using injected variables through agent.run()."""
@@ -123,16 +104,12 @@ class TestInjectedVariables:
             "Activate 'data-analysis' and copy the DATA_CONFIG variable to a new variable called 'config'."
         )
 
-        config = await agent_with_skills.runtime.retrieve('config')
+        config = await agent_with_skills.runtime.retrieve("config")
         assert config is not None
-        assert config['default_threshold'] == 1.5
-        assert config['max_data_points'] == 10000
-        assert 'csv' in config['supported_formats']
+        assert config["default_threshold"] == 1.5
+        assert config["max_data_points"] == 10000
+        assert "csv" in config["supported_formats"]
 
-
-# =============================================================================
-# Injected Type Tests
-# =============================================================================
 
 class TestInjectedTypes:
     """Test using injected types through agent.run()."""
@@ -145,15 +122,11 @@ class TestInjectedTypes:
             "and label='test'. Store it in a variable called 'point'."
         )
 
-        point = await agent_with_skills.runtime.retrieve('point')
+        point = await agent_with_skills.runtime.retrieve("point")
         assert point is not None
         assert point.value == 42.5
-        assert point.label == 'test'
+        assert point.label == "test"
 
-
-# =============================================================================
-# Multi-Turn Workflow Tests
-# =============================================================================
 
 class TestMultiTurnWorkflow:
     """Test multi-turn conversations with skills."""
@@ -169,10 +142,10 @@ class TestMultiTurnWorkflow:
             "Use calculate_stats on [10, 20, 30, 40, 50] and store the result in 'stats'."
         )
 
-        stats = await agent_with_skills.runtime.retrieve('stats')
+        stats = await agent_with_skills.runtime.retrieve("stats")
         assert stats is not None
-        assert 'mean' in stats
-        assert stats['mean'] == 30.0
+        assert "mean" in stats
+        assert stats["mean"] == 30.0
 
     @pytest.mark.asyncio
     async def test_full_workflow(self, agent_with_skills):
@@ -185,19 +158,15 @@ class TestMultiTurnWorkflow:
             "4. Find any outliers using find_outliers and store in 'outliers'"
         )
 
-        stats = await agent_with_skills.runtime.retrieve('stats')
-        outliers = await agent_with_skills.runtime.retrieve('outliers')
+        stats = await agent_with_skills.runtime.retrieve("stats")
+        outliers = await agent_with_skills.runtime.retrieve("outliers")
 
         assert stats is not None
-        assert 'mean' in stats
+        assert "mean" in stats
         assert outliers is not None
         # 100 should be detected as outlier
         assert 100 in outliers
 
-
-# =============================================================================
-# Error Handling Tests
-# =============================================================================
 
 class TestErrorHandling:
     """Test error handling through agent.run()."""
@@ -213,11 +182,6 @@ class TestErrorHandling:
         content = response.content.lower()
         # Should mention error or not found
         assert any(word in content for word in ["error", "not found", "available", "doesn't exist"])
-
-
-# =============================================================================
-# IPyKernelRuntime Integration Tests (LLM required)
-# =============================================================================
 
 
 @pytest_asyncio.fixture

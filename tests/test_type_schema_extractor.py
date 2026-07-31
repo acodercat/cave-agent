@@ -1,14 +1,9 @@
 """Tests for TypeSchemaExtractor class."""
 
-import pytest
-from typing import List, Dict, Optional, Union, Callable, Any
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from cave_agent.runtime import TypeSchemaExtractor
 
-
-# =============================================================================
-# Tests - Type Annotation Formatting
-# =============================================================================
 
 class TestGenericTypeHandling:
     """Test handling of generic types."""
@@ -42,10 +37,6 @@ class TestGenericTypeHandling:
         assert "list[dict[str, list[int]]]" == type_str
 
 
-# =============================================================================
-# Tests - Callable Handling
-# =============================================================================
-
 class TestCallableHandling:
     """Test handling of Callable types."""
 
@@ -54,10 +45,6 @@ class TestCallableHandling:
         type_str = TypeSchemaExtractor._format_type_annotation(Callable)
         assert type_str == "Callable"
 
-
-# =============================================================================
-# Tests - Edge Cases
-# =============================================================================
 
 class TestEdgeCases:
     """Test edge cases and error handling."""
