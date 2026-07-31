@@ -1,6 +1,6 @@
 [project]
 name = "cave-agent"
-version = "0.7.5"
+version = "0.8.0"
 description = "CaveAgent is a tool-augmented agent framework that enables function-calling through LLM code generation and provides runtime state management. Unlike traditional JSON-schema approaches, it natively handles complex Python objects like DataFrames and ndarrays within a persistent runtime, enabling lossless data flow across multi-turn interactions."
 readme = "README.md"
 authors = [
@@ -36,11 +36,17 @@ openai = [
     "openai>=2.46.0",
 ]
 
+ipykernel = [
+    "dill>=0.4.1",
+    "ipykernel>=7.3.0",
+]
+
+# Everything optional. Previously this omitted the ipykernel extra, so the
+# README's headline `pip install 'cave-agent[all]'` left IPyKernelRuntime
+# unusable.
 all = [
     "litellm>=1.92.0",
     "openai>=2.46.0",
-]
-ipykernel = [
     "dill>=0.4.1",
     "ipykernel>=7.3.0",
 ]
@@ -48,6 +54,30 @@ ipykernel = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Async tests need no @pytest.mark.asyncio decorator.
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "N", "UP", "B"]
+# MessageRole intentionally retains the historical ``str, Enum`` behaviour;
+# changing it to StrEnum would alter ``str(MessageRole.USER)`` for callers.
+ignore = ["UP042"]
+
+[tool.ruff.lint.per-file-ignores]
+# These assertions intentionally exercise the legacy typing spellings.
+"tests/test_type_schema_extractor.py" = ["UP006", "UP007", "UP035", "UP045"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
 
 # Keep heavy documentation assets (demo video, screenshots) out of the sdist —
 # they are not needed to build or use the package and bloated it to ~9.5 MB.
@@ -62,6 +92,8 @@ dev = [
     "hatch>=1.17.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pyright>=1.1.411",
+    "ruff>=0.16.1",
     "twine>=6.2.0",
     "litellm>=1.92.0",
     "openai>=2.46.0",

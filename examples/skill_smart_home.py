@@ -1,9 +1,10 @@
 import asyncio
 import os
 from pathlib import Path
+
 from cave_agent import CaveAgent
-from cave_agent.skills import SkillDiscovery
 from cave_agent.models import LiteLLMModel
+from cave_agent.skills import SkillDiscovery
 
 
 async def main():
