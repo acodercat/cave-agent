@@ -9,22 +9,19 @@ import asyncio
 import logging
 import random
 from collections.abc import Awaitable, Callable
-from typing import TypeVar
 
-from .errors import classify_provider_error, is_billing_exhausted
+from .errors import is_billing_exhausted, raise_model_error
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T")
-
 MAX_RETRIES = 5
-BASE_DELAY = 0.5   # seconds
-MAX_DELAY = 32.0    # seconds
+BASE_DELAY = 0.5  # seconds
+MAX_DELAY = 32.0  # seconds
 
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504, 529}
 
 
-async def with_retry(
+async def with_retry[T](
     operation: Callable[[], Awaitable[T]],
     max_retries: int = MAX_RETRIES,
 ) -> T:
@@ -42,13 +39,16 @@ async def with_retry(
             delay = get_retry_delay(attempt, error)
             logger.warning(
                 "API error (attempt %d/%d), retrying in %.1fs: %s",
-                attempt + 1, max_retries, delay, error,
+                attempt + 1,
+                max_retries,
+                delay,
+                error,
             )
             await asyncio.sleep(delay)
     raise RuntimeError("Unreachable")
 
 
-async def with_retry_typed(
+async def with_retry_typed[T](
     operation: Callable[[], Awaitable[T]],
     max_retries: int = MAX_RETRIES,
 ) -> T:
@@ -57,15 +57,13 @@ async def with_retry_typed(
 
     A context-length overflow becomes ``PromptTooLongError`` (so the agent can
     recover by compaction) and a billing exhaustion becomes
-    ``ProviderBillingError``; anything else propagates unchanged.
+    ``ProviderBillingError``. Everything else becomes ``ProviderError`` —
+    classification is total, so nothing leaves this layer untyped.
     """
     try:
         return await with_retry(operation, max_retries=max_retries)
     except Exception as error:
-        typed = classify_provider_error(error)
-        if typed is error:
-            raise
-        raise typed from error
+        raise_model_error(error)
 
 
 def is_retryable(error: Exception) -> bool:
@@ -82,6 +80,13 @@ def is_retryable(error: Exception) -> bool:
         # merely mentions "timeout" (an invalid-parameter error, not transient).
         return status in RETRYABLE_STATUS_CODES
     if isinstance(error, (ConnectionError, TimeoutError)):
+        return True
+    # Some SDKs name the condition only in the class. OpenAI's
+    # ``APITimeoutError`` has no status, is not a builtin ``TimeoutError``, and
+    # says "Request timed out." — so neither check above nor the message
+    # heuristic below matched, and a client timeout ended the run on its first
+    # occurrence while its sibling ``APIConnectionError`` was retried.
+    if any(marker in type(error).__name__.lower() for marker in ("timeout", "connection")):
         return True
     message = str(error).lower()
     if "connection" in message or "timeout" in message:
@@ -100,14 +105,23 @@ def get_retry_delay(attempt: int, error: Exception | None = None) -> float:
         if retry_after is not None:
             return min(retry_after, MAX_DELAY)
 
-    base = min(BASE_DELAY * (2 ** attempt), MAX_DELAY)
+    base = min(BASE_DELAY * (2**attempt), MAX_DELAY)
     jitter = random.uniform(0, 0.25 * base)
     return base + jitter
 
 
 def _get_retry_after(error: Exception) -> float | None:
-    """Extract Retry-After header value in seconds, if present."""
+    """Extract Retry-After header value in seconds, if present.
+
+    Looked for on the error *and* on its response: the OpenAI SDK carries
+    headers only at ``error.response.headers``, so reading ``error.headers``
+    alone found nothing on that path and every 429 was backed off on the
+    generic schedule while the server had said exactly how long to wait.
+    LiteLLM's wrappers do expose ``.headers``, which is what hid it.
+    """
     headers = getattr(error, "headers", None)
+    if headers is None:
+        headers = getattr(getattr(error, "response", None), "headers", None)
     if headers is None:
         return None
     retry_after = headers.get("retry-after") if hasattr(headers, "get") else None

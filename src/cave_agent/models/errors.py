@@ -3,7 +3,13 @@
 Concrete ``Model`` implementations translate their SDK's exceptions into
 these types so the agent loop can ``except`` on semantic error types without
 knowing the provider.
+
+Classification is **total**: :func:`classify_provider_error` maps anything to a
+:class:`ModelError`, and :func:`raise_model_error` is the single way an
+exception leaves this layer. Nothing untyped reaches the agent.
 """
+
+from typing import NoReturn
 
 
 class ModelError(Exception):
@@ -24,6 +30,30 @@ class ProviderBillingError(ModelError):
 
     Deterministic for this endpoint until a human tops up, so it is never
     retried (a top-up, not time, is what fixes it).
+    """
+
+
+class ProviderError(ModelError):
+    """A provider failure with no more specific classification.
+
+    The terminal arm of :func:`classify_provider_error`: a dropped connection,
+    a malformed response body, an SDK exception this release has never seen.
+    Typed so it ends the run with ``StopReason.MODEL_ERROR`` instead of
+    unwinding out of the agent loop past the terminal event every consumer
+    relies on. The original exception is always the ``__cause__``.
+    """
+
+
+class StreamStalledError(ModelError, TimeoutError):
+    """A streaming response produced no chunk within ``stream_idle_timeout``.
+
+    Typed as a :class:`ModelError` so the agent loop ends the run with
+    ``StopReason.MODEL_ERROR`` instead of letting a bare ``TimeoutError``
+    escape. A caller streaming to a browser needs a terminal event it can
+    forward, not an exception unwinding through its response middleware.
+
+    Also a :class:`TimeoutError`, so code that already catches that keeps
+    working — the classification is added, not swapped.
     """
 
 
@@ -62,11 +92,14 @@ _CONTEXT_LENGTH_PHRASES = (
 def is_context_length_exceeded(error: Exception) -> bool:
     """Detect "the prompt exceeds the context window" across providers.
 
-    OpenAI sets a structured ``code='context_length_exceeded'`` (checked
-    first); everyone else — and the OpenAI-compatible serving stacks behind
+    HTTP 413 and OpenAI's ``code='context_length_exceeded'`` are structured
+    signals; everyone else — and the OpenAI-compatible serving stacks behind
     one base URL — only signal it in the message, so fall back to phrase
     matching.
     """
+    status = getattr(error, "status_code", None) or getattr(error, "status", None)
+    if status == 413:
+        return True
     if getattr(error, "code", None) == "context_length_exceeded":
         return True
     message = str(error).lower()
@@ -124,12 +157,17 @@ def is_billing_exhausted(error: Exception) -> bool:
     return any(phrase in message for phrase in _BILLING_PHRASES)
 
 
-def classify_provider_error(error: Exception) -> Exception:
-    """Map a raw provider SDK exception to a typed :class:`ModelError` when it
-    matches a known category, else return it unchanged.
+def classify_provider_error(error: Exception) -> ModelError:
+    """Map a provider SDK exception onto the typed hierarchy.
 
-    Already-typed :class:`ModelError`\\ s pass through untouched (idempotent),
-    so wrapping a call twice can't double-translate.
+    **Total** — every input yields a :class:`ModelError`, falling back to
+    :class:`ProviderError`. That totality is the point: while this returned
+    unclassified errors unchanged, every call site needed its own
+    ``if typed is error`` fallback, and each of those fallbacks was a hole
+    through which a raw ``ConnectionError`` escaped the agent loop.
+
+    Already-typed errors pass through untouched (idempotent), so wrapping a
+    call twice cannot double-translate.
     """
     if isinstance(error, ModelError):
         return error
@@ -137,4 +175,17 @@ def classify_provider_error(error: Exception) -> Exception:
         return PromptTooLongError(str(error))
     if is_billing_exhausted(error):
         return ProviderBillingError(str(error))
-    return error
+    return ProviderError(f"{type(error).__name__}: {error}")
+
+
+def raise_model_error(error: Exception) -> NoReturn:
+    """Re-raise *error* as a typed :class:`ModelError`, preserving the cause.
+
+    The one way out of the model layer. Exists so no boundary re-implements
+    the classify-and-chain dance, and so adding a boundary is a one-liner that
+    cannot get the ``raise … from …`` wrong.
+    """
+    typed = classify_provider_error(error)
+    if typed is error:
+        raise error
+    raise typed from error
