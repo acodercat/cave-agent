@@ -1,8 +1,21 @@
-"""Prompts and transcript formatting for conversation summarization."""
+"""Prompts, markers and transcript formatting for conversation summarization."""
 
 import re
 
-MICROCOMPACT_PLACEHOLDER = "[Old execution result cleared to save context space]"
+from .._placeholders import MICROCOMPACT_PLACEHOLDER
+
+__all__ = [
+    "COMPACT_SYSTEM_PROMPT",
+    "COMPACT_USER_PROMPT",
+    "COMPACT_UPDATE_USER_TEMPLATE",
+    "COMPACTION_SUMMARY_MARKER",
+    "SUMMARY_MARKERS",
+    "COMPACTION_SUMMARY_USER_TEMPLATE",
+    "COMPACTION_SUMMARY_ASSISTANT_PLACEHOLDER",
+    "format_transcript",
+    "extract_summary",
+    "parse_legacy_summary",
+]
 
 COMPACT_SYSTEM_PROMPT = """\
 You are a conversation summarizer. Your task is to produce a concise yet \
@@ -41,23 +54,90 @@ COMPACT_USER_PROMPT = (
     "Focus on technical details essential for continuing the work."
 )
 
+# Used when the region being summarized already contains an earlier summary.
+# The prior summary is handed over VERBATIM and the model is asked to fold the
+# newer turns into it, rather than summarize a summary — see
+# ``Compactor._summarize_with_llm`` for why that distinction matters.
+COMPACT_UPDATE_USER_TEMPLATE = """\
+Below is an existing summary of the earlier part of this conversation, \
+followed by a transcript of everything that happened after it.
+
+<existing_summary>
+{prior_summary}
+</existing_summary>
+
+<new_turns>
+{transcript}
+</new_turns>
+
+Produce an UPDATED summary covering the whole conversation: preserve every \
+still-relevant fact from the existing summary verbatim where possible, fold \
+in what the new turns added, and drop only what the new turns made obsolete. \
+Do not re-compress the existing summary — it is already distilled."""
+
+# The envelope wrapping a compaction summary. Presentation only: it tells the
+# model it is reading a summary rather than an instruction. It is NOT how a
+# summary is recognized — ``SummaryMessage`` is, because this is text and a
+# user can type text.
+_SUMMARY_OPEN = "<conversation-summary>"
+_SUMMARY_CLOSE = "</conversation-summary>"
+
+COMPACTION_SUMMARY_USER_TEMPLATE = f"{_SUMMARY_OPEN}\n{{summary}}\n{_SUMMARY_CLOSE}"
+
+# The pre-envelope marker, kept only to recognize histories written by <=0.8.0.
+# Content alone cannot separate a real legacy summary from a user message that
+# happens to reproduce the old template — the bytes are identical — so the
+# legacy form is recognized only together with the acknowledgement the <=0.8.0
+# builder emitted with it, unconditionally, in the very next message. That pair
+# is evidence a user message cannot manufacture by accident.
+COMPACTION_SUMMARY_MARKER = "[Previous conversation summary]"
+
+# Every legacy wording ever shipped. Frozen: new formats go in the envelope
+# above, so this tuple only ever grows if a *past* release used another prefix.
+SUMMARY_MARKERS = (COMPACTION_SUMMARY_MARKER,)
+
+COMPACTION_SUMMARY_ASSISTANT_PLACEHOLDER = (
+    "Understood. I have the context from our previous conversation and I'm ready to continue."
+)
+
 _MAX_CONTENT_DISPLAY_CHARS = 2000
 
 
-def format_transcript(messages: list, max_chars_per_msg: int = _MAX_CONTENT_DISPLAY_CHARS) -> str:
-    """Render messages into a readable transcript for the summarizer."""
+def format_transcript(
+    messages: list, max_chars_per_msg: int | None = _MAX_CONTENT_DISPLAY_CHARS
+) -> str:
+    """Render messages into a readable transcript for the summarizer.
+
+    ``max_chars_per_msg=None`` disables per-message truncation — used when
+    fidelity matters more than length.
+    """
     lines: list[str] = []
     for msg in messages:
         content = msg.content
-        if content and content != MICROCOMPACT_PLACEHOLDER:
-            truncated = content[:max_chars_per_msg]
-            if len(content) > max_chars_per_msg:
-                truncated += "..."
-            lines.append(f"[{msg.role.value}]: {truncated}")
+        if not content or content == MICROCOMPACT_PLACEHOLDER:
+            continue
+        if max_chars_per_msg is not None and len(content) > max_chars_per_msg:
+            content = content[:max_chars_per_msg] + "..."
+        lines.append(f"[{msg.role.value}]: {content}")
     return "\n\n".join(lines)
 
 
 _SUMMARY_PATTERN = re.compile(r"<summary>(.*?)</summary>", re.DOTALL)
+
+
+def parse_legacy_summary(content: str) -> str | None:
+    """The summary body of a ``<=0.8.0`` summary message, else ``None``.
+
+    Text matching only, and text is what users write — so this alone is not
+    evidence. :func:`~cave_agent.compaction.migrate_legacy_summaries` is the
+    caller, and it requires the acknowledgement that builder always emitted
+    alongside; the two together are what a user message cannot produce by
+    accident.
+    """
+    for marker in SUMMARY_MARKERS:
+        if content.startswith(f"{marker}\n"):
+            return content[len(marker) :].strip()
+    return None
 
 
 def extract_summary(raw_output: str) -> str:
