@@ -5,7 +5,6 @@ environment (IPython shell or IPyKernel process), not by host-side code.
 """
 
 
-
 def activate_skill(skill_name: str) -> str:
     """Activate a skill and return its instructions.
 
@@ -43,10 +42,8 @@ def activate_skill(skill_name: str) -> str:
         frame = frame.f_back
 
     store = ns.get("_skill_store", {})
-    skill = store.get(skill_name)
-    if not skill:
+    if skill_name not in store:
         available = list(store.keys())
         raise KeyError(f"Skill '{skill_name}' not found. Available skills: {available}")
 
-    ns.update(skill["exports"])
-    return skill["body_content"]
+    return store[skill_name]

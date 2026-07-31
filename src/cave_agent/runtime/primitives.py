@@ -1,10 +1,10 @@
-from typing import (
-    Callable, Any, Optional, Union,
-    get_args, get_origin, ForwardRef
-)
 import inspect
+from collections.abc import Callable
+from dataclasses import MISSING, is_dataclass
+from dataclasses import fields as dataclass_fields
 from enum import Enum
-from dataclasses import is_dataclass, fields as dataclass_fields, MISSING
+from typing import Any, ForwardRef, Union, get_args, get_origin
+
 from pydantic import BaseModel
 
 
@@ -12,15 +12,16 @@ class Variable:
     """Represents a variable in the Python runtime environment."""
 
     name: str
-    description: Optional[str]
-    value: Optional[Any]
+    description: str | None
+    value: Any | None
     type_name: str
+    declared_type: type | None
 
     def __init__(
         self,
         name: str,
-        value: Optional[Any] = None,
-        description: Optional[str] = None,
+        value: Any | None = None,
+        description: str | None = None,
     ):
         """
         Initialize the variable.
@@ -33,7 +34,10 @@ class Variable:
         self.name = name
         self.value = value
         self.description = description
-        self.type_name = type(self.value).__name__ if self.value is not None else "NoneType"
+        self.declared_type = type(value) if value is not None else None
+        self.type_name = (
+            self.declared_type.__name__ if self.declared_type is not None else "NoneType"
+        )
 
     def __str__(self) -> str:
         """Return a string representation of the variable (without inline schema)."""
@@ -53,7 +57,7 @@ class Function:
     def __init__(
         self,
         func: Callable,
-        description: Optional[str] = None,
+        description: str | None = None,
         include_doc: bool = True,
     ) -> None:
         """
@@ -77,7 +81,7 @@ class Function:
             # Some C builtins / callables expose no introspectable signature.
             sig = "(...)"
         self.signature = f"{prefix}{self.name}{sig}"
-        self.doc: Optional[str] = None
+        self.doc: str | None = None
 
         if include_doc and hasattr(func, "__doc__") and func.__doc__:
             self.doc = func.__doc__.strip()
@@ -101,8 +105,10 @@ class Function:
         Returns:
             Formatted docstring
         """
+        doc = self.doc
+        assert doc is not None
         lines = ["  doc:"]
-        for line in self.doc.split('\n'):
+        for line in doc.split("\n"):
             lines.append(f"    {line}")
         return "\n".join(lines)
 
@@ -117,14 +123,14 @@ class Type:
 
     name: str
     value: type
-    description: Optional[str]
+    description: str | None
     include_schema: bool
     include_doc: bool
 
     def __init__(
         self,
         value: type,
-        description: Optional[str] = None,
+        description: str | None = None,
         include_schema: bool = True,
         include_doc: bool = True,
     ):
@@ -180,9 +186,9 @@ class Type:
 
         # Insert description after the type name line if provided
         if self.description:
-            lines = schema.split('\n')
+            lines = schema.split("\n")
             lines.insert(1, f"  description: {self.description}")
-            return '\n'.join(lines)
+            return "\n".join(lines)
 
         return schema
 
@@ -195,7 +201,7 @@ class TypeSchemaExtractor:
     """
 
     @classmethod
-    def _format_class_methods(cls, class_type: type, include_doc: bool = True) -> Optional[str]:
+    def _format_class_methods(cls, class_type: type, include_doc: bool = True) -> str | None:
         """
         Extract public method signatures from a class.
 
@@ -210,7 +216,7 @@ class TypeSchemaExtractor:
 
         for name, method in inspect.getmembers(class_type, predicate=inspect.isfunction):
             # Skip private and magic methods
-            if name.startswith('_'):
+            if name.startswith("_"):
                 continue
 
             try:
@@ -218,7 +224,7 @@ class TypeSchemaExtractor:
                 # Format parameters (skip 'self')
                 params = []
                 for param_name, param in sig.parameters.items():
-                    if param_name == 'self':
+                    if param_name == "self":
                         continue
                     param_str = param_name
                     if param.annotation != inspect.Parameter.empty:
@@ -258,11 +264,7 @@ class TypeSchemaExtractor:
         return "\n".join(lines)
 
     @classmethod
-    def _format_pydantic_schema(
-        cls,
-        model: type,
-        include_doc: bool = True
-    ) -> str:
+    def _format_pydantic_schema(cls, model: type, include_doc: bool = True) -> str:
         """
         Format a Pydantic model schema.
 
@@ -295,11 +297,7 @@ class TypeSchemaExtractor:
         return "\n".join(lines)
 
     @classmethod
-    def _format_dataclass_schema(
-        cls,
-        dataclass_type: type,
-        include_doc: bool = True
-    ) -> str:
+    def _format_dataclass_schema(cls, dataclass_type: type, include_doc: bool = True) -> str:
         """
         Format a dataclass schema.
 
@@ -332,7 +330,7 @@ class TypeSchemaExtractor:
         return "\n".join(lines)
 
     @classmethod
-    def _format_enum_schema(cls, enum_type: type) -> str:
+    def _format_enum_schema(cls, enum_type: type[Enum]) -> str:
         """
         Format an Enum schema.
 
@@ -384,7 +382,7 @@ class TypeSchemaExtractor:
                 arg_strs = [cls._format_type_annotation(arg) for arg in args]
                 return f"Union[{', '.join(arg_strs)}]"
 
-            origin_name = getattr(origin, '__name__', str(origin).replace('typing.', ''))
+            origin_name = getattr(origin, "__name__", str(origin).replace("typing.", ""))
 
             if not args:
                 return origin_name
@@ -397,7 +395,7 @@ class TypeSchemaExtractor:
             return "Callable"
 
         # Return the type name
-        if hasattr(type_hint, '__name__'):
+        if hasattr(type_hint, "__name__"):
             return type_hint.__name__
 
         return str(type_hint)
