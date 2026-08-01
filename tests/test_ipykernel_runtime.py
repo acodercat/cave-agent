@@ -2507,3 +2507,34 @@ class TestSilentRequestsUseAnAllowList:
 
         with pytest.raises(RuntimeExecutionError):
             await executor._execute_silent("x = 1")
+
+
+class TestMissingExtraGivesTheInstallHint:
+    """A base install importing the kernel backend must be told the fix, the
+    way the models layer already does — not handed a bare ``No module named
+    'dill'`` for a package it never asked for."""
+
+    def test_the_error_names_the_extra(self, monkeypatch):
+        import builtins
+        import importlib
+        import sys
+
+        real_import = builtins.__import__
+
+        def blocking(name, *args, **kwargs):
+            if name == "dill":
+                raise ModuleNotFoundError("No module named 'dill'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", blocking)
+        runtime_pkg = importlib.import_module("cave_agent.runtime")
+        for cached in [m for m in sys.modules if m.startswith("cave_agent.runtime.ipykernel")]:
+            monkeypatch.delitem(sys.modules, cached)
+        for attr in ("ipykernel_runtime", "ipykernel_executor"):
+            # A submodule import also lands as a package attribute, and
+            # ``from . import x`` takes the attribute before re-importing —
+            # left in place, the block above is never consulted.
+            monkeypatch.delattr(runtime_pkg, attr, raising=False)
+
+        with pytest.raises(ModuleNotFoundError, match=r"ipykernel.*extra"):
+            runtime_pkg.__getattr__("IPyKernelRuntime")
