@@ -12,7 +12,6 @@ Unit suites already pin each mechanism against controlled input; these prove
 the wiring under traffic we do not control.
 """
 
-import pytest
 
 from cave_agent import CaveAgent
 from cave_agent.events import ExecutionResultEvent, StoppedEvent, StopReason
