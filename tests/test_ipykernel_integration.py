@@ -1,16 +1,12 @@
 """Integration tests for CaveAgent + IPyKernelRuntime with a real LLM."""
 
-import pytest
-import pytest_asyncio
 from dataclasses import dataclass
 
+import pytest
+import pytest_asyncio
+
 from cave_agent import CaveAgent
-from cave_agent.runtime import IPyKernelRuntime, Function, Variable
-
-
-# ---------------------------------------------------------------------------
-# Helper classes
-# ---------------------------------------------------------------------------
+from cave_agent.runtime import Function, IPyKernelRuntime, Variable
 
 
 class DataAnalyzer:
@@ -47,10 +43,6 @@ class DataProcessor:
         return [x for x in data if x > threshold]
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
 NUMBERS = [3, 1, 4, 1, 5, 9, 2, 6, 5]
 
 
@@ -59,9 +51,16 @@ async def multi_turn_agent(model):
     """Agent with DataAnalyzer for multi-turn analysis."""
     runtime = IPyKernelRuntime(
         variables=[
-            Variable("analyzer", DataAnalyzer(), "Tool for analyzing numerical data\nusage: stats = analyzer.analyze(numbers)"),
+            Variable(
+                "analyzer",
+                DataAnalyzer(),
+                "Tool for analyzing numerical data\nusage: stats = analyzer.analyze(numbers)",
+            ),
             Variable("numbers", NUMBERS, "Input data to analyze\nusage: print(numbers)"),
-            Variable("stats", description="Store analysis results here\nusage: stats = analyzer.analyze(numbers)"),
+            Variable(
+                "stats",
+                description="Store analysis results here\nusage: stats = analyzer.analyze(numbers)",
+            ),
         ],
     )
     await runtime.start()
@@ -75,10 +74,24 @@ async def object_agent(model):
     """Agent with DataProcessor for object method calls."""
     runtime = IPyKernelRuntime(
         variables=[
-            Variable("processor", DataProcessor(), "Data processing tool\nusage: processed_data = processor.process_list(numbers)"),
-            Variable("numbers", NUMBERS, "Input list of numbers\nusage: filtered_data = processor.filter_numbers(numbers, 5)"),
-            Variable("processed_data", description="Store processed data here\nusage: processed_data = processor.process_list(numbers)"),
-            Variable("filtered_data", description="Store filtered data here\nusage: filtered_data = processor.filter_numbers(numbers, 5)"),
+            Variable(
+                "processor",
+                DataProcessor(),
+                "Data processing tool\nusage: processed_data = processor.process_list(numbers)",
+            ),
+            Variable(
+                "numbers",
+                NUMBERS,
+                "Input list of numbers\nusage: filtered_data = processor.filter_numbers(numbers, 5)",
+            ),
+            Variable(
+                "processed_data",
+                description="Store processed data here\nusage: processed_data = processor.process_list(numbers)",
+            ),
+            Variable(
+                "filtered_data",
+                description="Store filtered data here\nusage: filtered_data = processor.filter_numbers(numbers, 5)",
+            ),
         ],
     )
     await runtime.start()
@@ -106,11 +119,6 @@ async def calc_agent(model):
     await runtime.stop()
 
 
-# ---------------------------------------------------------------------------
-# Multi-turn conversation (mirrors test_multi_turn.py)
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_basic_analysis(multi_turn_agent):
     await multi_turn_agent.run("Analyze the numbers and store results in 'stats'")
@@ -135,13 +143,10 @@ async def test_multi_turn_conversation(multi_turn_agent):
     assert "4" in response.content.lower() or "four" in response.content.lower()
 
     # Turn 3: reasoning about data
-    response = await multi_turn_agent.run("Is the maximum value (9) significantly higher than the average?")
+    response = await multi_turn_agent.run(
+        "Is the maximum value (9) significantly higher than the average?"
+    )
     assert any(word in response.content.lower() for word in ["yes", "higher", "greater", "more"])
-
-
-# ---------------------------------------------------------------------------
-# Object method calls (mirrors test_object_methods.py)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -160,11 +165,6 @@ async def test_filter_numbers(object_agent):
     assert sorted(set(filtered_data)) == sorted(set(expected))
 
 
-# ---------------------------------------------------------------------------
-# Function calling
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_function_call(calc_agent):
     response = await calc_agent.run("Calculate 5 plus 3")
@@ -179,11 +179,6 @@ async def test_multi_turn_with_functions(calc_agent):
     assert "90" in response.content
 
 
-# ---------------------------------------------------------------------------
-# Kernel isolation
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_kernel_survives_error(model):
     """Kernel stays alive after an error, next turn works."""
@@ -192,7 +187,9 @@ async def test_kernel_survives_error(model):
     )
     await runtime.start()
     try:
-        agent = CaveAgent(model, runtime=runtime, instructions="Execute exactly what the user asks.")
+        agent = CaveAgent(
+            model, runtime=runtime, instructions="Execute exactly what the user asks."
+        )
         # First turn: trigger an error
         await agent.run("Calculate 1/0 and catch the error, then set result = 'recovered'")
         result = await runtime.retrieve("result")

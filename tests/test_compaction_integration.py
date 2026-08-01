@@ -1,8 +1,9 @@
 """Integration tests for context compaction with real API calls."""
 
 import pytest
+
 from cave_agent import CaveAgent
-from cave_agent.runtime import IPythonRuntime, Function, Variable
+from cave_agent.runtime import Function, IPythonRuntime, Variable
 
 
 def analyze(data: list) -> dict:
@@ -33,7 +34,6 @@ def compaction_agent(model):
         model,
         runtime=runtime,
         context_window=5_000,
-        display=False,
     )
 
 
@@ -41,7 +41,9 @@ def compaction_agent(model):
 async def test_compaction_triggers_on_long_conversation(compaction_agent):
     """After several turns with a small context_window, compaction should fire
     and the agent should still be able to answer correctly."""
-    await compaction_agent.run("Analyze the sales data using the analyze function and store in result")
+    await compaction_agent.run(
+        "Analyze the sales data using the analyze function and store in result"
+    )
     result = await compaction_agent.runtime.retrieve("result")
     assert result is not None
     assert "count" in result

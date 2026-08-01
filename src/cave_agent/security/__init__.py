@@ -1,11 +1,11 @@
 from .checker import SecurityChecker, SecurityError
 from .rules import (
+    AttributeRule,
+    FunctionRule,
+    ImportRule,
+    RegexRule,
     SecurityRule,
     SecurityViolation,
-    ImportRule,
-    FunctionRule,
-    AttributeRule,
-    RegexRule,
 )
 
 __all__ = [

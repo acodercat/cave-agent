@@ -10,9 +10,9 @@ import asyncio
 import os
 
 from rich.console import Console
+from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
-from rich.rule import Rule
 
 from cave_agent import CaveAgent
 from cave_agent.models.openai import OpenAIModel
@@ -23,7 +23,7 @@ console = Console()
 model = OpenAIModel(
     model_id=os.getenv("LLM_MODEL_ID"),
     api_key=os.getenv("LLM_API_KEY"),
-    base_url=os.getenv("LLM_BASE_URL")
+    base_url=os.getenv("LLM_BASE_URL"),
 )
 
 
@@ -46,22 +46,28 @@ async def main():
         model,
         runtime=IPythonRuntime(
             variables=[
-                Variable("data", [], "Input: list of dicts with keys 'name', 'age', 'dept', 'salary', 'rating'"),
+                Variable(
+                    "data",
+                    [],
+                    "Input: list of dicts with keys 'name', 'age', 'dept', 'salary', 'rating'",
+                ),
                 Variable("cleaned_data", [], "Output: list of dicts with no None values"),
             ]
         ),
-        display=False,
     )
 
     analyzer = CaveAgent(
         model,
         runtime=IPythonRuntime(
             variables=[
-                Variable("data", [], "Input: list of dicts with keys 'name', 'age', 'dept', 'salary', 'rating'"),
+                Variable(
+                    "data",
+                    [],
+                    "Input: list of dicts with keys 'name', 'age', 'dept', 'salary', 'rating'",
+                ),
                 Variable("insights", {}, "Output: dict with statistics"),
             ]
         ),
-        display=False,
     )
 
     # -- Orchestrator ------------------------------------------------------
@@ -71,8 +77,16 @@ async def main():
         runtime=IPythonRuntime(
             variables=[
                 Variable("raw_data", raw_data, "Raw dataset with potential null values"),
-                Variable("cleaner", cleaner, "Cleaner agent: call cleaner.runtime.update_variable('data', value) to set input, await cleaner.run('instruction') to execute, await cleaner.runtime.retrieve('cleaned_data') to get output"),
-                Variable("analyzer", analyzer, "Analyzer agent: call analyzer.runtime.update_variable('data', value) to set input, await analyzer.run('instruction') to execute, await analyzer.runtime.retrieve('insights') to get output"),
+                Variable(
+                    "cleaner",
+                    cleaner,
+                    "Cleaner agent: call cleaner.runtime.update_variable('data', value) to set input, await cleaner.run('instruction') to execute, await cleaner.runtime.retrieve('cleaned_data') to get output",
+                ),
+                Variable(
+                    "analyzer",
+                    analyzer,
+                    "Analyzer agent: call analyzer.runtime.update_variable('data', value) to set input, await analyzer.run('instruction') to execute, await analyzer.runtime.retrieve('insights') to get output",
+                ),
                 Variable("cleaned_data", [], "Cleaned data from cleaner agent"),
                 Variable("insights", {}, "Insights from analyzer agent"),
             ]
@@ -89,11 +103,10 @@ async def main():
     console.print()
 
     # Agent architecture (left) + Raw data (right)
-    from rich.columns import Columns
     from rich.panel import Panel
     from rich.syntax import Syntax
 
-    code = '''\
+    code = """\
 orchestrator = CaveAgent(
   model,
   runtime=IPythonRuntime(variables=[
@@ -104,7 +117,7 @@ orchestrator = CaveAgent(
     Variable("insights",     {}),
   ]),
   instructions="Coordinate cleaner → analyzer",
-)'''
+)"""
     panel_height = max(len(code.splitlines()) + 2, len(raw_data) + 3)
 
     code_panel = Panel(
@@ -122,12 +135,14 @@ orchestrator = CaveAgent(
     data_table.add_column("Salary", justify="right")
     data_table.add_column("Rating", justify="right")
     for record in raw_data:
+
         def fmt(val, is_number=False):
             if val is None:
                 return Text("None", style="red")
             if is_number and isinstance(val, (int, float)):
                 return f"{val:,}" if isinstance(val, int) else f"{val:.1f}"
             return str(val)
+
         data_table.add_row(
             record["name"],
             fmt(record["age"]),
@@ -135,9 +150,12 @@ orchestrator = CaveAgent(
             fmt(record["salary"], is_number=True),
             fmt(record["rating"]),
         )
-    data_panel = Panel(data_table, title="[bold]Raw Data[/]", border_style="dim", expand=True, height=panel_height)
+    data_panel = Panel(
+        data_table, title="[bold]Raw Data[/]", border_style="dim", expand=True, height=panel_height
+    )
 
     from rich.table import Table as LayoutTable
+
     layout = LayoutTable.grid(expand=True)
     layout.add_column(ratio=1)
     layout.add_column(ratio=1)
@@ -161,7 +179,13 @@ orchestrator = CaveAgent(
     console.print()
 
     # Cleaned data
-    result_table = Table(title="[dim]Cleaned Data[/]", show_header=True, header_style="bold", box=None, padding=(0, 1))
+    result_table = Table(
+        title="[dim]Cleaned Data[/]",
+        show_header=True,
+        header_style="bold",
+        box=None,
+        padding=(0, 1),
+    )
     result_table.add_column("Name")
     result_table.add_column("Age", justify="right")
     result_table.add_column("Dept")
@@ -180,7 +204,13 @@ orchestrator = CaveAgent(
 
     # Insights
     if final_insights:
-        insight_table = Table(title="[dim]Insights[/]", show_header=True, header_style="bold", border_style="green", padding=(0, 1))
+        insight_table = Table(
+            title="[dim]Insights[/]",
+            show_header=True,
+            header_style="bold",
+            border_style="green",
+            padding=(0, 1),
+        )
         insight_table.add_column("Metric", style="bold")
         insight_table.add_column("Value", justify="right")
         for key, value in final_insights.items():
@@ -191,14 +221,16 @@ orchestrator = CaveAgent(
 
     # Summary
     removed = len(raw_data) - len(final_cleaned)
-    console.print(Text.assemble(
-        ("  ", ""),
-        (f"{len(raw_data)}", "bold"),
-        (" raw → ", "dim"),
-        (f"{len(final_cleaned)}", "bold green"),
-        (" cleaned", "dim"),
-        (f"  ({removed} removed)", "dim red"),
-    ))
+    console.print(
+        Text.assemble(
+            ("  ", ""),
+            (f"{len(raw_data)}", "bold"),
+            (" raw → ", "dim"),
+            (f"{len(final_cleaned)}", "bold green"),
+            (" cleaned", "dim"),
+            (f"  ({removed} removed)", "dim red"),
+        )
+    )
     console.print()
 
 

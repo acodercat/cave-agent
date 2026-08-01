@@ -13,7 +13,8 @@ import os
 
 from cave_agent import CaveAgent
 from cave_agent.models import OpenAIModel
-from cave_agent.runtime import IPythonRuntime, Function, Variable
+from cave_agent.renderers import render_run
+from cave_agent.runtime import Function, IPythonRuntime, Variable
 
 model = OpenAIModel(
     model_id=os.getenv("LLM_MODEL_ID"),
@@ -46,21 +47,22 @@ async def main():
         ],
     )
 
-    # Small context_window → compaction triggers after a few rounds
+    # A window this small is below the compaction buffer, so the threshold
+    # falls back to half the window (1,500 tokens) — which is the point:
+    # compaction triggers after a few rounds instead of after a real session.
     agent = CaveAgent(
         model,
         runtime=runtime,
         context_window=3_000,
-        display=True,
     )
 
     # Each turn generates code + execution result, filling up context quickly.
     # After a few turns the compaction threshold is exceeded.
-    await agent.run("Analyze the sales data using the analyze function")
-    await agent.run("Find which months had above-average sales")
-    await agent.run("Calculate the total revenue and the quarter-by-quarter breakdown")
-    await agent.run("What's the month-over-month growth rate?")
-    await agent.run("Summarize everything into a report variable")
+    await render_run(agent, "Analyze the sales data using the analyze function")
+    await render_run(agent, "Find which months had above-average sales")
+    await render_run(agent, "Calculate the total revenue and the quarter-by-quarter breakdown")
+    await render_run(agent, "What's the month-over-month growth rate?")
+    await render_run(agent, "Summarize everything into a report variable")
 
     report = await runtime.retrieve("report")
     print("\n=== Final Report ===")

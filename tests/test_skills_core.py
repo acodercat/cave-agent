@@ -1,16 +1,13 @@
-import pytest
 import tempfile
 from pathlib import Path
 
-from cave_agent.skills import Skill, SkillRegistry, SkillDiscovery
+import pytest
+
 from cave_agent import CaveAgent
-from cave_agent.runtime import IPythonRuntime, IPyKernelRuntime, Function, Variable, Type
 from cave_agent.models import Model
+from cave_agent.runtime import Function, IPyKernelRuntime, IPythonRuntime, Type, Variable
+from cave_agent.skills import Skill, SkillDiscovery, SkillRegistry
 
-
-# =============================================================================
-# Fixtures
-# =============================================================================
 
 @pytest.fixture
 def temp_dir():
@@ -46,17 +43,16 @@ def skill_file(temp_dir, valid_skill_content):
 @pytest.fixture
 def mock_model():
     """Mock model for agent tests."""
+
     class MockModel(Model):
-        async def call(self, messages):
+        async def _complete(self, messages):
             pass
+
         async def stream(self, messages):
             yield ""
+
     return MockModel()
 
-
-# =============================================================================
-# Skill Tests
-# =============================================================================
 
 class TestSkill:
     def test_skill_creation(self):
@@ -64,7 +60,7 @@ class TestSkill:
         skill = Skill(
             name="my-skill",
             description="A custom skill",
-            body_content="# Instructions\nDo something."
+            body_content="# Instructions\nDo something.",
         )
         assert skill.name == "my-skill"
         assert skill.description == "A custom skill"
@@ -75,13 +71,12 @@ class TestSkill:
 
     def test_skill_with_functions(self):
         """Test Skill with injected functions."""
+
         def helper(x):
             return x * 2
 
         skill = Skill(
-            name="func-skill",
-            description="Skill with functions",
-            functions=[Function(helper)]
+            name="func-skill", description="Skill with functions", functions=[Function(helper)]
         )
         assert len(skill.functions) == 1
         assert skill.functions[0].name == "helper"
@@ -91,26 +86,24 @@ class TestSkill:
         skill = Skill(
             name="var-skill",
             description="Skill with variables",
-            variables=[Variable("config", value={"key": "value"})]
+            variables=[Variable("config", value={"key": "value"})],
         )
         assert len(skill.variables) == 1
         assert skill.variables[0].name == "config"
 
     def test_skill_with_types(self):
         """Test Skill with injected types."""
+
         class MyClass:
             pass
 
-        skill = Skill(
-            name="type-skill",
-            description="Skill with types",
-            types=[Type(MyClass)]
-        )
+        skill = Skill(name="type-skill", description="Skill with types", types=[Type(MyClass)])
         assert len(skill.types) == 1
         assert skill.types[0].name == "MyClass"
 
     def test_skill_with_all_injections(self):
         """Test Skill with functions, variables, and types."""
+
         def func():
             pass
 
@@ -123,7 +116,7 @@ class TestSkill:
             body_content="Instructions",
             functions=[Function(func)],
             variables=[Variable("var", value=42)],
-            types=[Type(MyType)]
+            types=[Type(MyType)],
         )
         assert skill.name == "full-skill"
         assert len(skill.functions) == 1
@@ -131,9 +124,34 @@ class TestSkill:
         assert len(skill.types) == 1
 
 
-# =============================================================================
-# SkillDiscovery Tests
-# =============================================================================
+class TestSkillRegistrationIsAtomic:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("runtime_cls", [IPythonRuntime, IPyKernelRuntime])
+    async def test_collision_leaves_no_earlier_export_behind(self, runtime_cls):
+        from .fakes import FakeModel
+
+        def leaked():
+            return "should never be bound"
+
+        skill = Skill(
+            name="broken",
+            description="contains colliding exports",
+            functions=[Function(leaked)],
+            variables=[Variable("leaked", 1)],
+        )
+        runtime = runtime_cls()
+        try:
+            with pytest.raises(ValueError, match="already exists|collides"):
+                CaveAgent(FakeModel(["unused"]), runtime=runtime, skills=[skill])
+
+            # Both backends answer this the same way now: an unbound name is
+            # a KeyError, because None is a value a variable can hold.
+            with pytest.raises(KeyError):
+                await runtime.get_from_namespace("leaked")
+        finally:
+            if isinstance(runtime, IPyKernelRuntime):
+                await runtime.stop()
+
 
 class TestSkillDiscoveryFromFile:
     def test_load_valid_skill(self, skill_file):
@@ -146,9 +164,7 @@ class TestSkillDiscoveryFromFile:
 
     def test_load_skill_with_injection(self, temp_dir):
         """Test loading skill with injection.py."""
-        (temp_dir / "SKILL.md").write_text(
-            "---\nname: test\ndescription: Test\n---\nContent"
-        )
+        (temp_dir / "SKILL.md").write_text("---\nname: test\ndescription: Test\n---\nContent")
         (temp_dir / "injection.py").write_text("""
 from cave_agent.runtime import Function, Variable, Type
 
@@ -229,9 +245,7 @@ __exports__ = [
 
     def test_missing_exports_raises_error(self, temp_dir):
         """Test missing __exports__ raises SkillDiscovery.Error."""
-        (temp_dir / "SKILL.md").write_text(
-            "---\nname: test\ndescription: Test\n---\nContent"
-        )
+        (temp_dir / "SKILL.md").write_text("---\nname: test\ndescription: Test\n---\nContent")
         (temp_dir / "injection.py").write_text("""
 def helper():
     pass
@@ -244,9 +258,7 @@ def helper():
 
     def test_invalid_injection_module_raises_error(self, temp_dir):
         """Test invalid injection module raises SkillDiscovery.Error."""
-        (temp_dir / "SKILL.md").write_text(
-            "---\nname: test\ndescription: Test\n---\nContent"
-        )
+        (temp_dir / "SKILL.md").write_text("---\nname: test\ndescription: Test\n---\nContent")
         (temp_dir / "injection.py").write_text("""
 # Invalid Python syntax
 def broken(
@@ -311,10 +323,6 @@ class TestSkillDiscoveryFromDirectory:
         assert "Skills directory not found" in str(exc_info.value)
 
 
-# =============================================================================
-# SkillRegistry Tests
-# =============================================================================
-
 class TestSkillRegistry:
     def test_add_and_get_skill(self):
         registry = SkillRegistry()
@@ -359,38 +367,7 @@ class TestBuildSkillStore:
         store = registry.build_skill_store()
 
         assert "test" in store
-        assert store["test"]["body_content"] == "Instructions"
-
-    def test_store_contains_function_exports(self):
-        def helper(x):
-            return x * 2
-
-        registry = SkillRegistry()
-        registry.add_skill(Skill(name="test", description="Test", functions=[Function(helper)]))
-        store = registry.build_skill_store()
-
-        assert "helper" in store["test"]["exports"]
-        assert store["test"]["exports"]["helper"](5) == 10
-
-    def test_store_contains_variable_exports(self):
-        registry = SkillRegistry()
-        registry.add_skill(Skill(
-            name="test", description="Test",
-            variables=[Variable("CONFIG", value={"key": "val"})],
-        ))
-        store = registry.build_skill_store()
-
-        assert store["test"]["exports"]["CONFIG"] == {"key": "val"}
-
-    def test_store_contains_type_exports(self):
-        class MyType:
-            pass
-
-        registry = SkillRegistry()
-        registry.add_skill(Skill(name="test", description="Test", types=[Type(MyType)]))
-        store = registry.build_skill_store()
-
-        assert store["test"]["exports"]["MyType"] is MyType
+        assert store["test"] == "Instructions"
 
     def test_store_multiple_skills(self):
         registry = SkillRegistry()
@@ -399,13 +376,9 @@ class TestBuildSkillStore:
         store = registry.build_skill_store()
 
         assert len(store) == 2
-        assert store["a"]["body_content"] == "A instructions"
-        assert store["b"]["body_content"] == "B instructions"
+        assert store["a"] == "A instructions"
+        assert store["b"] == "B instructions"
 
-
-# =============================================================================
-# CaveAgent Skills Integration Tests
-# =============================================================================
 
 class TestAgentSkillsInit:
     def test_agent_with_skills_list(self, mock_model):
@@ -414,9 +387,7 @@ class TestAgentSkillsInit:
         assert agent._skill_registry.get_skill("test-skill") is not None
 
     def test_agent_with_skills_from_discovery(self, temp_dir, mock_model):
-        (temp_dir / "SKILL.md").write_text(
-            "---\nname: test\ndescription: Test skill\n---\nContent"
-        )
+        (temp_dir / "SKILL.md").write_text("---\nname: test\ndescription: Test skill\n---\nContent")
         skills = SkillDiscovery.from_directory(temp_dir)
         agent = CaveAgent(model=mock_model, skills=skills)
         assert agent._skill_registry.get_skill("test") is not None
@@ -470,7 +441,8 @@ class TestAgentSkillsRuntime:
 
     @pytest.mark.asyncio
     async def test_activate_skill_injects_exports(self, mock_model):
-        """activate_skill injects functions/variables into namespace."""
+        """Activation reveals instructions for runtime-managed exports."""
+
         def helper(x):
             return x * 2
 
@@ -490,6 +462,49 @@ class TestAgentSkillsRuntime:
 
         result = await agent.runtime.execute("print(sum(data))")
         assert "6" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_skill_exports_survive_reset(self, mock_model):
+        def helper(x):
+            return x * 2
+
+        agent = CaveAgent(
+            model=mock_model,
+            skills=[
+                Skill(
+                    name="my-skill",
+                    description="Test",
+                    body_content="Instructions",
+                    functions=[Function(helper)],
+                )
+            ],
+        )
+        await agent.runtime.execute('activate_skill("my-skill")')
+
+        await agent.runtime.reset()
+        result = await agent.runtime.execute("print(helper(5))")
+
+        assert result.success
+        assert result.stdout.strip() == "10"
+
+    def test_skill_export_cannot_replace_a_registered_resource(self, mock_model):
+        def helper(x):
+            return x * 2
+
+        runtime = IPythonRuntime(variables=[Variable("helper", "registered")])
+
+        with pytest.raises(ValueError, match="already exists"):
+            CaveAgent(
+                model=mock_model,
+                runtime=runtime,
+                skills=[
+                    Skill(
+                        name="my-skill",
+                        description="Test",
+                        functions=[Function(helper)],
+                    )
+                ],
+            )
 
     @pytest.mark.asyncio
     async def test_activate_skill_not_found(self, mock_model):
@@ -526,7 +541,9 @@ class TestActivateSkillNamespaceResolution:
             return x * 2
 
         skill = Skill(
-            name="my-skill", description="Test", body_content="INSTRUCTIONS",
+            name="my-skill",
+            description="Test",
+            body_content="INSTRUCTIONS",
             functions=[Function(helper)],
         )
         runtime = IPythonRuntime()
@@ -558,10 +575,6 @@ class TestActivateSkillNamespaceResolution:
         result = await runtime.execute("print(out)")
         assert "INSTRUCTIONS" in result.stdout
 
-
-# =============================================================================
-# IPyKernelRuntime Skills Tests
-# =============================================================================
 
 class TestAgentSkillsIPyKernel:
     """Test CaveAgent skills with IPyKernelRuntime."""
@@ -595,7 +608,8 @@ class TestAgentSkillsIPyKernel:
 
     @pytest.mark.asyncio
     async def test_activate_skill_injects_exports_in_kernel(self, mock_model):
-        """activate_skill injects functions/variables into kernel namespace."""
+        """Activation reveals instructions for kernel-managed exports."""
+
         def helper(x):
             return x * 2
 
@@ -624,6 +638,36 @@ class TestAgentSkillsIPyKernel:
             await runtime.stop()
 
     @pytest.mark.asyncio
+    async def test_skill_exports_survive_kernel_reset(self, mock_model):
+        def helper(x):
+            return x * 2
+
+        runtime = IPyKernelRuntime()
+        CaveAgent(
+            model=mock_model,
+            runtime=runtime,
+            skills=[
+                Skill(
+                    name="my-skill",
+                    description="Test",
+                    body_content="Instructions",
+                    functions=[Function(helper)],
+                )
+            ],
+        )
+        await runtime.start()
+        try:
+            await runtime.execute('activate_skill("my-skill")')
+            await runtime.reset()
+
+            result = await runtime.execute("print(helper(5))")
+
+            assert result.success
+            assert result.stdout.strip() == "10"
+        finally:
+            await runtime.stop()
+
+    @pytest.mark.asyncio
     async def test_activate_nonexistent_skill_in_kernel(self, mock_model):
         """activate_skill raises KeyError for unknown skill in kernel."""
         skill = Skill(name="real-skill", description="Test")
@@ -639,10 +683,6 @@ class TestAgentSkillsIPyKernel:
             await runtime.stop()
 
 
-# =============================================================================
-# Function.is_async Tests
-# =============================================================================
-
 class TestFunctionIsAsync:
     def test_sync_function_is_async_false(self):
         def sync_func():
@@ -657,3 +697,200 @@ class TestFunctionIsAsync:
 
         func = Function(async_func)
         assert func.is_async is True
+
+
+class TestInjectionModulesResolveTheirOwnClasses:
+    """An injection module was executed without ever being registered in
+    ``sys.modules``, so anything resolving a class back to its module failed:
+    ``dataclasses`` reads ``sys.modules[cls.__module__].__dict__`` to evaluate
+    annotations, and a skill combining ``from __future__ import annotations``
+    with ``@dataclass`` died on ``'NoneType' object has no attribute
+    '__dict__'`` — an error naming nothing near the cause.
+    """
+
+    @staticmethod
+    def _write_skill(directory: Path, name: str, injection: str) -> None:
+        skill_dir = directory / name
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: a test skill\n---\n\n# Body\n"
+        )
+        (skill_dir / "injection.py").write_text(injection)
+
+    def test_a_postponed_annotation_dataclass_loads(self, temp_dir):
+        self._write_skill(
+            Path(temp_dir),
+            "dataclass-skill",
+            "from __future__ import annotations\n"
+            "from dataclasses import dataclass\n"
+            "from cave_agent import Variable\n\n"
+            "@dataclass\n"
+            "class Point:\n"
+            "    x: int\n"
+            "    y: int\n\n"
+            '__exports__ = [Variable("origin", Point(0, 0))]\n',
+        )
+
+        (skill,) = SkillDiscovery.from_directory(Path(temp_dir))
+
+        assert [v.name for v in skill.variables] == ["origin"]
+
+    def test_get_type_hints_resolves_a_skill_defined_class(self, temp_dir):
+        """Type auto-injection calls it, and it needs the same registration."""
+        self._write_skill(
+            Path(temp_dir),
+            "hints-skill",
+            "from __future__ import annotations\n"
+            "from cave_agent import Function\n\n"
+            "class Payload:\n"
+            "    pass\n\n"
+            "def build() -> Payload:\n"
+            "    return Payload()\n\n"
+            "__exports__ = [Function(build)]\n",
+        )
+
+        (skill,) = SkillDiscovery.from_directory(Path(temp_dir))
+        runtime = IPythonRuntime(functions=list(skill.functions))
+
+        assert "Payload" in runtime._types
+
+    def test_no_injection_module_is_left_registered(self, temp_dir):
+        """The sys.modules slot is held only while the module executes. Left
+        registered, the module looks importable, dill serializes the skill's
+        exports by *reference* to it — and the kernel subprocess, which cannot
+        import it, died on ModuleNotFoundError and latched the runtime shut."""
+        import sys
+
+        self._write_skill(
+            Path(temp_dir),
+            "loaded-skill",
+            "from cave_agent import Variable\n__exports__ = [Variable('v', 1)]\n",
+        )
+
+        SkillDiscovery.from_directory(Path(temp_dir))
+
+        assert "skill_injection_loaded-skill" not in sys.modules
+
+    def test_a_failing_injection_module_is_not_left_registered(self, temp_dir):
+        import sys
+
+        self._write_skill(Path(temp_dir), "broken-skill", "raise RuntimeError('boom')\n")
+
+        with pytest.raises(SkillDiscovery.Error):
+            SkillDiscovery.from_directory(Path(temp_dir))
+
+        assert "skill_injection_broken-skill" not in sys.modules
+
+    def test_a_module_that_deregisters_itself_does_not_mask_the_outcome(self, temp_dir):
+        """A module body may pop its own sys.modules entry (a known re-import
+        trick). The cleanup must tolerate the missing key — a raise from
+        ``finally`` replaces whatever was propagating."""
+        self._write_skill(
+            Path(temp_dir),
+            "self-removing-skill",
+            "import sys\n"
+            "sys.modules.pop(__name__, None)\n"
+            "from cave_agent import Variable\n"
+            "__exports__ = [Variable('v', 1)]\n",
+        )
+
+        (skill,) = SkillDiscovery.from_directory(Path(temp_dir))
+
+        assert [v.name for v in skill.variables] == ["v"]
+
+    def test_skill_exports_survive_a_process_boundary(self, temp_dir):
+        """The offline stand-in for the kernel backend: a skill function must
+        deserialize in an interpreter that never loaded the skill. This is the
+        gap the live suite caught — by-reference payloads resolve fine in the
+        host process and only fail in the subprocess."""
+        import subprocess
+        import sys
+
+        import dill
+
+        self._write_skill(
+            Path(temp_dir),
+            "portable-skill",
+            "from cave_agent import Function\n"
+            "def calculate_stats(data):\n"
+            "    return sum(data) / len(data)\n"
+            "__exports__ = [Function(calculate_stats)]\n",
+        )
+
+        (skill,) = SkillDiscovery.from_directory(Path(temp_dir))
+        payload = dill.dumps(skill.functions[0].func)
+
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys, dill; f = dill.loads(sys.stdin.buffer.read()); print(f([2, 4, 6]))",
+            ],
+            input=payload,
+            capture_output=True,
+            timeout=60,
+        )
+
+        assert probe.returncode == 0, probe.stderr.decode()
+        assert probe.stdout.decode().strip() == "4.0"
+
+
+class TestSkillSignatureTypesReachTheNamespace:
+    """Skill exports are hidden raw bindings, and the raw-binding path skipped
+    the signature walk explicit registration performs — so a skill whose
+    instructions say to construct Order(...) shipped a namespace with no
+    Order, and generated code failed NameError on the skill's own contract."""
+
+    @staticmethod
+    def _order_skill():
+        from dataclasses import dataclass
+
+        @dataclass
+        class Order:
+            item: str
+
+        def add_order(order: Order) -> str:
+            return f"added {order.item}"
+
+        return Skill(
+            name="orders",
+            description="order management",
+            body_content="Call add_order(Order(item=...))",
+            functions=[Function(add_order)],
+        ), Order
+
+    async def test_a_signature_type_is_constructible_in_generated_code(self):
+        from cave_agent import CaveAgent
+        from tests.fakes import FakeModel
+
+        skill, _ = self._order_skill()
+        runtime = IPythonRuntime()
+        CaveAgent(model=FakeModel(), runtime=runtime, skills=[skill])
+
+        result = await runtime.execute("print(add_order(Order(item='book')))")
+
+        assert result.success
+        assert "added book" in result.stdout
+
+    async def test_a_variable_value_type_is_injected_too(self):
+        from dataclasses import dataclass
+
+        from cave_agent import CaveAgent
+        from tests.fakes import FakeModel
+
+        @dataclass
+        class Config:
+            retries: int
+
+        skill = Skill(
+            name="configured",
+            description="carries a config object",
+            body_content="Read cfg, or build another Config.",
+            variables=[Variable("cfg", Config(retries=3))],
+        )
+        runtime = IPythonRuntime()
+        CaveAgent(model=FakeModel(), runtime=runtime, skills=[skill])
+
+        result = await runtime.execute("print(Config(retries=9))")
+
+        assert result.success

@@ -1,14 +1,17 @@
+import asyncio
+import os
+
 from cave_agent import CaveAgent
 from cave_agent.models import OpenAIModel
-from cave_agent.runtime import IPythonRuntime, Variable, Type
-import os
-import asyncio
+from cave_agent.renderers import render_run
+from cave_agent.runtime import IPythonRuntime, Type, Variable
 
 model = OpenAIModel(
     model_id=os.getenv("LLM_MODEL_ID"),
     api_key=os.getenv("LLM_API_KEY"),
-    base_url=os.getenv("LLM_BASE_URL")
+    base_url=os.getenv("LLM_BASE_URL"),
 )
+
 
 # Define data processing class
 class DataAnalyzer:
@@ -29,12 +32,8 @@ class DataAnalyzer:
 
     def analyze(self, data: list) -> dict:
         """Calculate basic statistical measures for a list of numbers."""
-        return {
-            'min': min(data),
-            'max': max(data),
-            'avg': sum(data) / len(data),
-            'len': len(data)
-        }
+        return {"min": min(data), "max": max(data), "avg": sum(data) / len(data), "len": len(data)}
+
 
 async def main():
     # Setup context
@@ -45,43 +44,42 @@ async def main():
     analyzer_var = Variable(
         name="analyzer",
         value=analyzer,
-        description="Tool for analyzing numerical data\nusage: stats = analyzer.analyze(numbers)"
+        description="Tool for analyzing numerical data\nusage: stats = analyzer.analyze(numbers)",
     )
 
     numbers_var = Variable(
-        name="numbers",
-        value=numbers,
-        description="Input data to analyze\nusage: print(numbers)"
+        name="numbers", value=numbers, description="Input data to analyze\nusage: print(numbers)"
     )
 
     stats_var = Variable(
         name="stats",
-        description="Store analysis results here\nusage: stats = analyzer.analyze(numbers)"
+        description="Store analysis results here\nusage: stats = analyzer.analyze(numbers)",
     )
 
     # Create runtime with variables
     runtime = IPythonRuntime(
-        variables=[analyzer_var, numbers_var, stats_var],
-        types=[Type(DataAnalyzer)]
+        variables=[analyzer_var, numbers_var, stats_var], types=[Type(DataAnalyzer)]
     )
 
     # Create agent
-    agent = CaveAgent(model, runtime=runtime, display=True)
+    agent = CaveAgent(model, runtime=runtime)
 
     # Multi-turn conversation
     print("Starting analysis conversation...")
 
     # First turn - get basic stats
-    await agent.run("Analyze the numbers and store the results in 'stats'")
-    stats = await agent.runtime.retrieve('stats')
+    await render_run(agent, "Analyze the numbers and store the results in 'stats'")
+    stats = await agent.runtime.retrieve("stats")
     print("\nBasic stats:", stats)
 
     # Second turn - ask about specific stat
-    response = await agent.run("What is the average value in the stats?")
+    response = await render_run(agent, "What is the average value in the stats?")
     print("\nAverage value:", response.content)
 
     # Third turn - ask for interpretation
-    response = await agent.run("Is the maximum value (9) significantly higher than the average?")
+    response = await render_run(
+        agent, "Is the maximum value (9) significantly higher than the average?"
+    )
     print("\nInterpretation:", response.content)
 
     # # Alternative approach with streaming
@@ -97,6 +95,7 @@ async def main():
     #     "Analyze the numbers, calculate the range (max - min), and tell me if the data is spread out"
     # ):
     #     print(f"[{event.type.value}] {event.content}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -1,14 +1,9 @@
 """Tests for TypeSchemaExtractor class."""
 
-import pytest
-from typing import List, Dict, Optional, Union, Callable, Any
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from cave_agent.runtime import TypeSchemaExtractor
 
-
-# =============================================================================
-# Tests - Type Annotation Formatting
-# =============================================================================
 
 class TestGenericTypeHandling:
     """Test handling of generic types."""
@@ -42,10 +37,6 @@ class TestGenericTypeHandling:
         assert "list[dict[str, list[int]]]" == type_str
 
 
-# =============================================================================
-# Tests - Callable Handling
-# =============================================================================
-
 class TestCallableHandling:
     """Test handling of Callable types."""
 
@@ -54,10 +45,6 @@ class TestCallableHandling:
         type_str = TypeSchemaExtractor._format_type_annotation(Callable)
         assert type_str == "Callable"
 
-
-# =============================================================================
-# Tests - Edge Cases
-# =============================================================================
 
 class TestEdgeCases:
     """Test edge cases and error handling."""
@@ -80,3 +67,43 @@ class TestEdgeCases:
         type_str = TypeSchemaExtractor._format_type_annotation(Any)
         # Any doesn't have __name__, falls back to str()
         assert "Any" in type_str
+
+
+class TestPep604UnionsRenderAsPython:
+    """`int | None` and `Optional[int]` mean the same thing but arrive as
+    different origins — `types.UnionType` and `typing.Union`. Recognizing only
+    the second showed the model `UnionType[int, None]`: not an expression it
+    can write back, and inconsistent with the `Optional[...]` beside it."""
+
+    def test_an_optional_pep604_union(self):
+        assert TypeSchemaExtractor._format_type_annotation(int | None) == "Optional[int]"
+
+    def test_a_pep604_union_over_a_generic(self):
+        assert (
+            TypeSchemaExtractor._format_type_annotation(dict[str, int] | None)
+            == "Optional[dict[str, int]]"
+        )
+
+    def test_a_multi_arm_pep604_union(self):
+        assert (
+            TypeSchemaExtractor._format_type_annotation(int | str | bool) == "Union[int, str, bool]"
+        )
+
+    def test_both_spellings_agree(self):
+        from typing import Optional
+
+        assert TypeSchemaExtractor._format_type_annotation(
+            int | None
+        ) == TypeSchemaExtractor._format_type_annotation(Optional[int])
+
+    def test_a_dataclass_field_renders_runnably(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class Config:
+            retries: int | None
+
+        schema = TypeSchemaExtractor._format_dataclass_schema(Config)
+
+        assert "UnionType" not in schema
+        assert "Optional[int]" in schema

@@ -30,11 +30,11 @@ __exports__ = [
     Variable(
         "sales_data",
         value=sales_data,
-        description="List[Dict] of sales transactions with keys: amount, category, region"
+        description="List[Dict] of sales transactions with keys: amount, category, region",
     ),
     Variable(
         "regional_targets",
         value=regional_targets,
-        description="Dict[str, float] mapping region (north, south, east, west) to sales target"
+        description="Dict[str, float] mapping region (north, south, east, west) to sales target",
     ),
 ]

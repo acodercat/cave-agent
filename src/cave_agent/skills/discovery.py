@@ -1,11 +1,19 @@
-from pathlib import Path
-from typing import List
-import re
-import yaml
 import importlib.util
+import re
+import sys
+from pathlib import Path
+
+import yaml
+
+from ..runtime import Function, Type, Variable
+from .constants import (
+    INJECTION_FILENAME,
+    MAX_DESCRIPTION_LENGTH,
+    MAX_NAME_LENGTH,
+    NAME_PATTERN,
+    SKILL_FILENAME,
+)
 from .skill import Skill
-from .constants import SKILL_FILENAME, INJECTION_FILENAME, MAX_NAME_LENGTH, MAX_DESCRIPTION_LENGTH, NAME_PATTERN
-from ..runtime import Function, Variable, Type
 
 
 class SkillDiscovery:
@@ -18,7 +26,6 @@ class SkillDiscovery:
 
     class Error(Exception):
         """Raised when skill discovery or parsing fails."""
-        pass
 
     @classmethod
     def from_file(cls, path: Path) -> Skill:
@@ -55,7 +62,7 @@ class SkillDiscovery:
         )
 
     @classmethod
-    def from_directory(cls, directory: Path) -> List[Skill]:
+    def from_directory(cls, directory: Path) -> list[Skill]:
         """
         Discover all skills from a directory.
 
@@ -83,8 +90,8 @@ class SkillDiscovery:
         """Read file content."""
         try:
             return path.read_text(encoding="utf-8")
-        except Exception as e:
-            raise cls.Error(f"Failed to read skill file '{path}': {e}")
+        except Exception as error:
+            raise cls.Error(f"Failed to read skill file '{path}': {error}") from error
 
     @classmethod
     def _parse_frontmatter(cls, path: Path, content: str) -> tuple[str, str]:
@@ -95,8 +102,8 @@ class SkillDiscovery:
 
         try:
             frontmatter = yaml.safe_load(match.group(1))
-        except yaml.YAMLError as e:
-            raise cls.Error(f"Invalid YAML in '{path}': {e}")
+        except yaml.YAMLError as error:
+            raise cls.Error(f"Invalid YAML in '{path}': {error}") from error
 
         if not isinstance(frontmatter, dict):
             raise cls.Error(f"Frontmatter must be a dictionary in '{path}'")
@@ -122,7 +129,9 @@ class SkillDiscovery:
         if not isinstance(description, str):
             raise cls.Error(f"Field 'description' must be a string in '{path}'")
         if len(description) > MAX_DESCRIPTION_LENGTH:
-            raise cls.Error(f"Field 'description' exceeds {MAX_DESCRIPTION_LENGTH} characters in '{path}'")
+            raise cls.Error(
+                f"Field 'description' exceeds {MAX_DESCRIPTION_LENGTH} characters in '{path}'"
+            )
 
         return name, description
 
@@ -131,25 +140,58 @@ class SkillDiscovery:
         """Extract body content (everything after frontmatter)."""
         match = re.match(r"^---\s*\n.*?\n---\s*\n?", content, re.DOTALL)
         if match:
-            return content[match.end():].strip()
+            return content[match.end() :].strip()
         return content.strip()
 
     @classmethod
-    def _load_injection(cls, skill_dir: Path, skill_name: str) -> tuple[List[Function], List[Variable], List[Type]]:
+    def _load_injection(
+        cls,
+        skill_dir: Path,
+        skill_name: str,
+    ) -> tuple[list[Function], list[Variable], list[Type]]:
         """Load injection.py if present, return (functions, variables, types)."""
         injection_path = skill_dir / INJECTION_FILENAME
         if not injection_path.exists():
             return [], [], []
 
-        spec = importlib.util.spec_from_file_location(f"skill_injection_{skill_name}", injection_path)
+        spec = importlib.util.spec_from_file_location(
+            f"skill_injection_{skill_name}", injection_path
+        )
         if spec is None or spec.loader is None:
             raise cls.Error(f"Failed to load injection module: '{injection_path}'")
 
+        module = importlib.util.module_from_spec(spec)
+        # Registered for exactly the window the module executes — the same
+        # window Python itself holds a slot during import — then removed.
+        #
+        # Registered, because decoration-time machinery resolves a class back
+        # to its module: ``dataclasses`` reads
+        # ``sys.modules[cls.__module__].__dict__`` to evaluate annotations, so
+        # an unregistered module made every skill combining ``from __future__
+        # import annotations`` with ``@dataclass`` die on ``'NoneType' object
+        # has no attribute '__dict__'`` — an error naming nothing near the
+        # cause. (``get_type_hints`` on a skill *function* stays safe either
+        # way: it resolves through ``__globals__``.)
+        #
+        # Removed, because a lasting entry makes the module look importable:
+        # dill then serializes the skill's exports *by reference* to a module
+        # only this process can resolve, and the kernel backend's
+        # deserialization died on ``ModuleNotFoundError`` — latching the
+        # runtime shut. Unregistered, dill falls back to by-value, which is
+        # the only form a payload crossing a process boundary can rely on.
+        sys.modules[spec.name] = module
         try:
-            module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-        except Exception as e:
-            raise cls.Error(f"Error loading injection module '{injection_path}': {e}")
+        except Exception as error:
+            raise cls.Error(
+                f"Error loading injection module '{injection_path}': {error}"
+            ) from error
+        finally:
+            # ``pop``, not ``del``: a module body may remove its own entry (a
+            # known re-import trick), and a raise from ``finally`` *replaces*
+            # whatever was propagating — the same failure mode the stream-close
+            # path guards against.
+            sys.modules.pop(spec.name, None)
 
         if not hasattr(module, "__exports__"):
             raise cls.Error(f"Missing __exports__ in '{injection_path}'")

@@ -8,13 +8,17 @@
 import pytest
 
 from cave_agent import CaveAgent
-from cave_agent.agent import ExecutionStatus
-from cave_agent.models import Model, ModelResponse, TokenUsage, StreamResponse, StreamDelta
+from cave_agent.events import StoppedEvent, StopReason
+from cave_agent.models import (
+    Model,
+    ModelResponse,
+    ProviderError,
+    StreamDelta,
+    StreamResponse,
+    TokenUsage,
+)
 from cave_agent.runtime import IPythonRuntime
-from cave_agent.types import EventType
 
-
-# --- OpenAI-style chunk doubles -------------------------------------------
 
 class _Delta:
     def __init__(self, content=None):
@@ -34,8 +38,6 @@ class _Chunk:
         self.choices = [_Choice(content, finish)]
         self.usage = None
 
-
-# --- A provider-style stream that drives the StreamResponse base -----------
 
 class _RawStream:
     """Minimal raw provider stream exposing __aiter__/__anext__/close."""
@@ -69,10 +71,6 @@ class _ProviderStream(StreamResponse):
         return self.raw
 
 
-# ===========================================================================
-# #1 — stream close
-# ===========================================================================
-
 class TestStreamClose:
     @pytest.mark.asyncio
     async def test_aclose_closes_underlying_and_is_idempotent(self):
@@ -91,27 +89,25 @@ class TestStreamClose:
             def __init__(self):
                 self.last_stream = None
 
-            async def call(self, messages):
+            async def _complete(self, messages):
                 raise NotImplementedError
 
             def stream(self, messages):
-                self.last_stream = _ProviderStream([
-                    _Chunk(content="```python\nprint(1)\n```"),
-                    _Chunk(content=" trailing (never read)"),
-                    _Chunk(finish="stop"),
-                ])
+                self.last_stream = _ProviderStream(
+                    [
+                        _Chunk(content="```python\nprint(1)\n```"),
+                        _Chunk(content=" trailing (never read)"),
+                        _Chunk(finish="stop"),
+                    ]
+                )
                 return self.last_stream
 
         model = _Model()
-        agent = CaveAgent(model=model, runtime=IPythonRuntime(), display=False, max_steps=1)
+        agent = CaveAgent(model=model, runtime=IPythonRuntime(), max_steps=1)
         [event async for event in agent.stream_events("go")]
         assert model.last_stream.raw is not None
         assert model.last_stream.raw.closed is True
 
-
-# ===========================================================================
-# #3 — SSE-connect retry
-# ===========================================================================
 
 class _FlakyRaw:
     def __init__(self, parent):
@@ -124,7 +120,7 @@ class _FlakyRaw:
     async def __anext__(self):
         # Drop the very first read (before any text) to simulate an SSE-connect
         # failure; succeed once the parent's fail budget is spent.
-        if self._parent.fails > 0 and self._i == 0 and not self._parent._yielded_any:
+        if self._parent.fails > 0 and self._i == 0 and not self._parent._received_output:
             self._parent.fails -= 1
             raise ConnectionError("SSE connect dropped")
         if self._i == 0:
@@ -185,10 +181,68 @@ class TestConnectRetry:
                 return _Raw()
 
         got = []
-        with pytest.raises(ConnectionError):
+        # Typed at the boundary (ProviderError), with the original as __cause__.
+        with pytest.raises(ProviderError) as excinfo:
             async for delta in _S():
                 got.append(delta.content)
         assert got == ["hi"]  # yielded once, then the error propagates un-retried
+        assert isinstance(excinfo.value.__cause__, ConnectionError)
+
+    @pytest.mark.asyncio
+    async def test_no_retry_after_refusal(self):
+        from types import SimpleNamespace
+
+        class _S(StreamResponse):
+            def __init__(self):
+                super().__init__()
+                self.opens = 0
+
+            async def _open_stream(self):
+                self.opens += 1
+                attempt = self.opens
+
+                async def chunks():
+                    yield SimpleNamespace(
+                        usage=None,
+                        choices=[
+                            SimpleNamespace(
+                                finish_reason=None,
+                                delta=SimpleNamespace(
+                                    content=None,
+                                    refusal="No.",
+                                    reasoning=None,
+                                    reasoning_content=None,
+                                ),
+                            )
+                        ],
+                    )
+                    if attempt == 1:
+                        raise ConnectionError("drop after refusal")
+                    yield SimpleNamespace(
+                        usage=None,
+                        choices=[
+                            SimpleNamespace(
+                                finish_reason="stop",
+                                delta=SimpleNamespace(
+                                    content=None,
+                                    refusal=None,
+                                    reasoning=None,
+                                    reasoning_content=None,
+                                ),
+                            )
+                        ],
+                    )
+
+                return chunks()
+
+        stream = _S()
+        with pytest.raises(ProviderError) as excinfo:
+            async for _ in stream:
+                pass
+
+        assert stream.opens == 1
+        assert stream.refusal == "No."
+        assert isinstance(excinfo.value.__cause__, ConnectionError)
 
     @pytest.mark.asyncio
     async def test_non_retryable_error_propagates(self):
@@ -206,14 +260,11 @@ class TestConnectRetry:
             async def _open_stream(self):
                 return _Raw()
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ProviderError) as excinfo:
             async for _ in _S():
                 pass
+        assert isinstance(excinfo.value.__cause__, ValueError)
 
-
-# ===========================================================================
-# #5 — wall-clock cap
-# ===========================================================================
 
 class _TextStream(StreamResponse):
     def __init__(self):
@@ -232,30 +283,35 @@ class _TextStream(StreamResponse):
 
 
 class _TextModel(Model):
-    async def call(self, messages):
-        return ModelResponse(content="done", finish_reason="stop", token_usage=TokenUsage(prompt_tokens=1))
+    async def _complete(self, messages):
+        return ModelResponse(
+            content="done", finish_reason="stop", usage=TokenUsage(prompt_tokens=1)
+        )
 
     def stream(self, messages):
         return _TextStream()
 
 
 def _agent(**kwargs):
-    return CaveAgent(model=_TextModel(), runtime=IPythonRuntime(), display=False, **kwargs)
+    return CaveAgent(model=_TextModel(), runtime=IPythonRuntime(), **kwargs)
 
 
 class TestWallClockCap:
     @pytest.mark.asyncio
-    async def test_non_streaming_times_out(self):
+    async def test_run_times_out(self):
         resp = await _agent(max_run_time=0.0).run("hi")
-        assert resp.status == ExecutionStatus.TIMEOUT
-        assert resp.steps_taken == 0
+        assert resp.stop_reason is StopReason.TIMEOUT
+        assert resp.steps == 0
 
     @pytest.mark.asyncio
-    async def test_stream_emits_timeout_event(self):
+    async def test_stream_reports_timeout_reason(self):
         events = [e async for e in _agent(max_run_time=0.0).stream_events("hi")]
-        assert any(e.type == EventType.MAX_RUN_TIME_REACHED for e in events)
+        stopped = [e for e in events if isinstance(e, StoppedEvent)]
+        assert len(stopped) == 1
+        assert stopped[0].stop_reason is StopReason.TIMEOUT
 
     @pytest.mark.asyncio
     async def test_none_disables_and_completes(self):
         resp = await _agent(max_run_time=None).run("hi")
-        assert resp.status == ExecutionStatus.SUCCESS
+        assert resp.stop_reason is StopReason.COMPLETED
+        assert resp.completed

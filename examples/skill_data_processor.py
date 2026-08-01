@@ -3,8 +3,8 @@ import os
 from pathlib import Path
 
 from cave_agent import CaveAgent
-from cave_agent.skills import SkillDiscovery
 from cave_agent.models import LiteLLMModel
+from cave_agent.skills import SkillDiscovery
 
 
 async def main():
@@ -35,10 +35,8 @@ async def main():
     queries = [
         # Query 1: Overall sales analysis
         "How are our overall sales doing?",
-
         # Query 2: Regional breakdown
         "How is the north region performing against target?",
-
         # Query 3: Commission calculation
         "Calculate the commissions for electronics sales.",
     ]

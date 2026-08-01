@@ -1,18 +1,21 @@
-"""IPythonRuntime — in-process execution using IPython shell."""
+"""IPythonRuntime — in-process execution using an IPython shell."""
 
 from __future__ import annotations
 
 from ..security import SecurityChecker
-from .executor import IPythonExecutor, ErrorFeedbackMode
-from .primitives import Variable, Function, Type
-from .runtime import Runtime
+from .base import BaseRuntime
+from .executor import ErrorFeedbackMode, IPythonExecutor
+from .primitives import Function, Type, Variable
 
 
-class IPythonRuntime(Runtime):
+class IPythonRuntime(BaseRuntime):
     """A Python runtime that executes code in-process via IPython InteractiveShell.
 
-    This is the default runtime for CaveAgent. Code runs in the same process,
-    giving direct access to injected Python objects without serialization.
+    The default runtime. Code runs in the same process, so injected objects are
+    reached directly with no serialization — a DataFrame stays the same object
+    across turns. The tradeoff is isolation: a segfault or OOM in generated code
+    takes the host down with it, and :meth:`interrupt` cannot preempt CPU-bound
+    code. Use :class:`~cave_agent.runtime.IPyKernelRuntime` when that matters.
     """
 
     def __init__(
@@ -23,8 +26,12 @@ class IPythonRuntime(Runtime):
         security_checker: SecurityChecker | None = None,
         error_feedback_mode: ErrorFeedbackMode = ErrorFeedbackMode.PLAIN,
     ):
-        self._executor = IPythonExecutor(
-            security_checker=security_checker,
-            error_feedback_mode=error_feedback_mode,
+        super().__init__(
+            IPythonExecutor(
+                security_checker=security_checker,
+                error_feedback_mode=error_feedback_mode,
+            ),
+            functions=functions,
+            variables=variables,
+            types=types,
         )
-        super().__init__(functions=functions, variables=variables, types=types)

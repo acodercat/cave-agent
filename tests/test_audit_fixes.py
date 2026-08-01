@@ -10,30 +10,40 @@ Covers:
 
 import pytest
 
-from cave_agent.runtime import IPythonRuntime, Variable, Function
-from cave_agent.skills import Skill
-from cave_agent.security import (
-    SecurityChecker, ImportRule, FunctionRule, RegexRule,
-)
-from cave_agent.models.retry import is_retryable
-from cave_agent.compaction import full_compact_needed
+from cave_agent.compaction import Compactor
 from cave_agent.compaction.tokens import estimate_tokens
-from cave_agent.types import SystemMessage, UserMessage
+from cave_agent.messages import SystemMessage, UserMessage
+from cave_agent.models.retry import is_retryable
+from cave_agent.runtime import Function, IPythonRuntime, Variable
+from cave_agent.security import (
+    FunctionRule,
+    ImportRule,
+    RegexRule,
+    SecurityChecker,
+)
+from cave_agent.skills import Skill
 
-
-# ---------------------------------------------------------------------------
-# Runtime isolation (#1)
-# ---------------------------------------------------------------------------
 
 def _wire_skills(runtime, *skills):
     """Inject skills into a runtime the way ``CaveAgent._init_skills`` does."""
-    from cave_agent.skills import SkillRegistry
     from cave_agent.runtime.builtins import activate_skill
+    from cave_agent.skills import SkillRegistry
 
     registry = SkillRegistry()
     registry.add_skills(list(skills))
-    runtime.inject_into_namespace("_skill_store", registry.build_skill_store())
-    runtime.inject_function(Function(activate_skill))
+    bindings = []
+    for skill in skills:
+        for function in skill.functions:
+            bindings.append((function.name, function.func))
+        for variable in skill.variables:
+            bindings.append((variable.name, variable.value))
+        for type_obj in skill.types:
+            bindings.append((type_obj.name, type_obj.value))
+    bindings.append(("_skill_store", registry.build_skill_store()))
+    runtime.inject_resources(
+        functions=[Function(activate_skill)],
+        bindings=bindings,
+    )
 
 
 class TestRuntimeIsolation:
@@ -74,8 +84,10 @@ class TestRuntimeIsolation:
             return f"hi {name}"
 
         skill = Skill(
-            name="greeter", description="greets",
-            body_content="USE greet()", functions=[Function(greet)],
+            name="greeter",
+            description="greets",
+            body_content="USE greet()",
+            functions=[Function(greet)],
         )
         rt = IPythonRuntime()
         _wire_skills(rt, skill)
@@ -93,16 +105,14 @@ class TestRuntimeIsolation:
         assert not r3.success
 
 
-# ---------------------------------------------------------------------------
-# Security hardening (#2)
-# ---------------------------------------------------------------------------
-
 class TestSecurityHardening:
     def _checker(self):
-        return SecurityChecker([
-            ImportRule({"os", "subprocess"}),
-            FunctionRule({"eval", "open"}),
-        ])
+        return SecurityChecker(
+            [
+                ImportRule({"os", "subprocess"}),
+                FunctionRule({"eval", "open"}),
+            ]
+        )
 
     def test_submodule_import_is_blocked(self):
         chk = self._checker()
@@ -126,8 +136,8 @@ class TestSecurityHardening:
 
     def test_regex_scans_whole_module_not_just_expressions(self):
         chk = SecurityChecker([RegexRule(r"delete", "no delete")])
-        assert chk.check_code("y = delete_everything()")   # assignment RHS
-        assert chk.check_code("import delete")              # import statement
+        assert chk.check_code("y = delete_everything()")  # assignment RHS
+        assert chk.check_code("import delete")  # import statement
         assert not chk.check_code("x = keep()")
 
     def test_regex_reports_once(self):
@@ -135,10 +145,6 @@ class TestSecurityHardening:
         violations = chk.check_code("print(1)\nprint(2)\nprint(3)")
         assert len(violations) == 1
 
-
-# ---------------------------------------------------------------------------
-# Retry classification (#6)
-# ---------------------------------------------------------------------------
 
 class TestRetryClassification:
     class _APIError(Exception):
@@ -161,29 +167,33 @@ class TestRetryClassification:
         assert not is_retryable(Exception("totally unrelated"))
 
 
-# ---------------------------------------------------------------------------
-# Compaction estimate + prediction (#4, UX)
-# ---------------------------------------------------------------------------
+def _compactor(context_window: int = 128_000) -> Compactor:
+    """A compactor whose model declares nothing, so the fallback reserve applies."""
+    from .fakes import FakeModel
+
+    return Compactor(FakeModel(), context_window=context_window)
+
 
 class TestCompactionEstimates:
-    def test_estimate_uses_max_of_heuristic_and_api(self):
-        msgs = [UserMessage("x" * 400)]          # heuristic ~100 tokens
-        assert estimate_tokens(msgs, api_token_count=5000) == 5000
-        assert estimate_tokens(msgs, api_token_count=1) == 100   # api under-counts
+    def test_estimate_anchors_to_the_api_count(self):
+        from cave_agent.compaction.tokens import TokenAnchor
+
+        msgs = [UserMessage("x" * 400)]  # heuristic ~100 tokens
+        assert estimate_tokens(msgs, TokenAnchor(5000, estimate_tokens(msgs))) == 5000
+        # An anchor taken against a larger history no longer describes this one.
+        assert estimate_tokens(msgs, TokenAnchor(1, 400)) == 100
 
     def test_full_compact_not_needed_when_small(self):
         msgs = [SystemMessage("sys"), UserMessage("hi")]
-        assert full_compact_needed(msgs, context_window=128_000) is False
+        _, needs = _compactor().microcompact(msgs)
+        assert needs is False
 
     def test_full_compact_needed_when_huge(self):
         # One enormous user message that microcompact cannot shrink.
         msgs = [SystemMessage("sys"), UserMessage("x" * 2_000_000)]
-        assert full_compact_needed(msgs, context_window=128_000) is True
+        _, needs = _compactor().microcompact(msgs)
+        assert needs is True
 
-
-# ---------------------------------------------------------------------------
-# Function construction robustness (polish)
-# ---------------------------------------------------------------------------
 
 class TestFunctionRobustness:
     def test_signatureless_callable_does_not_crash(self):
@@ -191,3 +201,39 @@ class TestFunctionRobustness:
         fn = Function(len)
         assert fn.name == "len"
         assert "(" in fn.signature
+
+
+class TestSecurityChecksFailClosed:
+    """A check that could not run has not found the code clean.
+
+    `RegexRule` used to scan `ast.unparse` of the module, which recurses per
+    node; a long chained expression blew the stack, the failure was swallowed,
+    and every regex rule silently stopped applying to that cell.
+    """
+
+    def _checker(self):
+        from cave_agent.security import FunctionRule, RegexRule, SecurityChecker
+
+        return SecurityChecker([RegexRule(r"rm -rf"), FunctionRule({"system"})])
+
+    def test_a_deep_expression_does_not_disable_the_regex_rule(self):
+        deep = "x = " + "+".join(["1"] * 2000) + "\nimport os\nos.system('rm -rf /')"
+        plain = "import os\nos.system('rm -rf /')"
+
+        assert len(self._checker().check_code(deep)) == len(self._checker().check_code(plain))
+
+    def test_clean_code_is_still_clean(self):
+        assert self._checker().check_code("x = 1") == []
+
+    def test_a_rule_that_raises_is_reported_not_skipped(self):
+        from cave_agent.security import SecurityChecker
+        from cave_agent.security.rules import SecurityRule
+
+        class Broken(SecurityRule):
+            def check(self, node):
+                raise RuntimeError("rule exploded")
+
+        violations = SecurityChecker([Broken()]).check_code("x = 1")
+
+        assert violations, "a check that could not run must not report clean"
+        assert "could not be evaluated" in violations[0].message

@@ -1,5 +1,4 @@
-from typing import List, Optional
-from ..runtime import Function, Variable, Type
+from ..runtime import Function, Type, Variable
 
 
 class Skill:
@@ -25,18 +24,18 @@ class Skill:
     name: str
     description: str
     body_content: str
-    functions: List[Function]
-    variables: List[Variable]
-    types: List[Type]
+    functions: list[Function]
+    variables: list[Variable]
+    types: list[Type]
 
     def __init__(
         self,
         name: str,
         description: str,
         body_content: str = "",
-        functions: Optional[List[Function]] = None,
-        variables: Optional[List[Variable]] = None,
-        types: Optional[List[Type]] = None,
+        functions: list[Function] | None = None,
+        variables: list[Variable] | None = None,
+        types: list[Type] | None = None,
     ):
         """
         Initialize a skill.
@@ -45,16 +44,16 @@ class Skill:
             name: Skill name (used to identify and activate the skill)
             description: Brief description of what the skill does
             body_content: Instructions and guidance for using the skill
-            functions: Functions to inject into runtime when activated
-            variables: Variables to inject into runtime when activated
-            types: Types to inject into runtime when activated
+            functions: Functions bound for code generated after activation
+            variables: Variables bound for code generated after activation
+            types: Types bound for code generated after activation
         """
         self.name = name
         self.description = description
         self.body_content = body_content
-        self.functions = functions or []
-        self.variables = variables or []
-        self.types = types or []
+        self.functions = list(functions or ())
+        self.variables = list(variables or ())
+        self.types = list(types or ())
 
     def __repr__(self) -> str:
         return f"Skill(name={self.name!r}, description={self.description!r})"

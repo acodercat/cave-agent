@@ -13,8 +13,8 @@ import os
 
 from cave_agent import CaveAgent
 from cave_agent.models import OpenAIModel
-from cave_agent.runtime import IPythonRuntime, Function, Variable
-
+from cave_agent.renderers import render_run
+from cave_agent.runtime import Function, IPythonRuntime, Variable
 
 model = OpenAIModel(
     model_id=os.getenv("LLM_MODEL_ID"),
@@ -26,11 +26,11 @@ model = OpenAIModel(
 def generate_data(n: int) -> list[dict]:
     """Generate n sample records with id, name, and score."""
     import random
+
     random.seed(42)
     names = ["Alice", "Bob", "Charlie", "Diana", "Eve", "Frank", "Grace", "Hank"]
     return [
-        {"id": i, "name": random.choice(names), "score": random.randint(50, 100)}
-        for i in range(n)
+        {"id": i, "name": random.choice(names), "score": random.randint(50, 100)} for i in range(n)
     ]
 
 
@@ -50,15 +50,15 @@ async def main():
     agent = CaveAgent(
         model,
         runtime=runtime,
-        display=True,
     )
 
     # This prompt asks for a long, detailed output that may trigger
     # finish_reason="length" if the model's max_tokens is low.
-    await agent.run(
+    await render_run(
+        agent,
         "Generate 50 sample records using generate_data, then produce a detailed "
         "statistical analysis: group by name, compute per-person average/min/max "
-        "scores, rank them, and store a formatted summary in the 'summary' variable."
+        "scores, rank them, and store a formatted summary in the 'summary' variable.",
     )
 
     summary = await runtime.retrieve("summary")

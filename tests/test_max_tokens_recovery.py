@@ -1,18 +1,23 @@
 """Integration tests for max_tokens output recovery with real API calls."""
 
+import os
+
 import pytest
+
 from cave_agent import CaveAgent
 from cave_agent.models import OpenAIModel
-from cave_agent.runtime import IPythonRuntime, Function, Variable
-import os
+from cave_agent.runtime import Function, IPythonRuntime, Variable
 
 
 def generate_data(n: int) -> list[dict]:
     """Generate n sample records with id, name, and score."""
     import random
+
     random.seed(42)
     names = ["Alice", "Bob", "Charlie", "Diana", "Eve"]
-    return [{"id": i, "name": random.choice(names), "score": random.randint(50, 100)} for i in range(n)]
+    return [
+        {"id": i, "name": random.choice(names), "score": random.randint(50, 100)} for i in range(n)
+    ]
 
 
 @pytest.fixture
@@ -37,7 +42,6 @@ def recovery_agent(small_output_model):
     return CaveAgent(
         small_output_model,
         runtime=runtime,
-        display=False,
     )
 
 
@@ -58,6 +62,5 @@ async def test_recovery_produces_code_execution(recovery_agent):
     response = await recovery_agent.run(
         "Generate 10 records using generate_data and store the result in summary"
     )
-    summary = await recovery_agent.runtime.retrieve("summary")
-    # The agent may or may not succeed in storing, but it should not crash
+    await recovery_agent.runtime.retrieve("summary")
     assert response is not None
