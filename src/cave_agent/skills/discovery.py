@@ -161,22 +161,33 @@ class SkillDiscovery:
             raise cls.Error(f"Failed to load injection module: '{injection_path}'")
 
         module = importlib.util.module_from_spec(spec)
-        # Registered before execution, and left registered afterwards, because
-        # anything that resolves a class back to its module looks it up here:
-        # ``dataclasses`` reads ``sys.modules[cls.__module__].__dict__`` to
-        # evaluate annotations, so an unregistered module made every skill
-        # combining ``from __future__ import annotations`` with ``@dataclass``
-        # die on ``'NoneType' object has no attribute '__dict__'`` — an error
-        # naming nothing near the cause. ``get_type_hints`` on a skill-defined
-        # class, which type auto-injection calls, needs it for the same reason.
+        # Registered for exactly the window the module executes — the same
+        # window Python itself holds a slot during import — then removed.
+        #
+        # Registered, because decoration-time machinery resolves a class back
+        # to its module: ``dataclasses`` reads
+        # ``sys.modules[cls.__module__].__dict__`` to evaluate annotations, so
+        # an unregistered module made every skill combining ``from __future__
+        # import annotations`` with ``@dataclass`` die on ``'NoneType' object
+        # has no attribute '__dict__'`` — an error naming nothing near the
+        # cause. (``get_type_hints`` on a skill *function* stays safe either
+        # way: it resolves through ``__globals__``.)
+        #
+        # Removed, because a lasting entry makes the module look importable:
+        # dill then serializes the skill's exports *by reference* to a module
+        # only this process can resolve, and the kernel backend's
+        # deserialization died on ``ModuleNotFoundError`` — latching the
+        # runtime shut. Unregistered, dill falls back to by-value, which is
+        # the only form a payload crossing a process boundary can rely on.
         sys.modules[spec.name] = module
         try:
             spec.loader.exec_module(module)
         except Exception as error:
-            del sys.modules[spec.name]
             raise cls.Error(
                 f"Error loading injection module '{injection_path}': {error}"
             ) from error
+        finally:
+            del sys.modules[spec.name]
 
         if not hasattr(module, "__exports__"):
             raise cls.Error(f"Missing __exports__ in '{injection_path}'")

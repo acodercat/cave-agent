@@ -754,6 +754,23 @@ class TestInjectionModulesResolveTheirOwnClasses:
 
         assert "Payload" in runtime._types
 
+    def test_no_injection_module_is_left_registered(self, temp_dir):
+        """The sys.modules slot is held only while the module executes. Left
+        registered, the module looks importable, dill serializes the skill's
+        exports by *reference* to it — and the kernel subprocess, which cannot
+        import it, died on ModuleNotFoundError and latched the runtime shut."""
+        import sys
+
+        self._write_skill(
+            Path(temp_dir),
+            "loaded-skill",
+            "from cave_agent import Variable\n__exports__ = [Variable('v', 1)]\n",
+        )
+
+        SkillDiscovery.from_directory(Path(temp_dir))
+
+        assert "skill_injection_loaded-skill" not in sys.modules
+
     def test_a_failing_injection_module_is_not_left_registered(self, temp_dir):
         import sys
 
@@ -763,6 +780,42 @@ class TestInjectionModulesResolveTheirOwnClasses:
             SkillDiscovery.from_directory(Path(temp_dir))
 
         assert "skill_injection_broken-skill" not in sys.modules
+
+    def test_skill_exports_survive_a_process_boundary(self, temp_dir):
+        """The offline stand-in for the kernel backend: a skill function must
+        deserialize in an interpreter that never loaded the skill. This is the
+        gap the live suite caught — by-reference payloads resolve fine in the
+        host process and only fail in the subprocess."""
+        import subprocess
+        import sys
+
+        import dill
+
+        self._write_skill(
+            Path(temp_dir),
+            "portable-skill",
+            "from cave_agent import Function\n"
+            "def calculate_stats(data):\n"
+            "    return sum(data) / len(data)\n"
+            "__exports__ = [Function(calculate_stats)]\n",
+        )
+
+        (skill,) = SkillDiscovery.from_directory(Path(temp_dir))
+        payload = dill.dumps(skill.functions[0].func)
+
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys, dill; f = dill.loads(sys.stdin.buffer.read()); print(f([2, 4, 6]))",
+            ],
+            input=payload,
+            capture_output=True,
+            timeout=60,
+        )
+
+        assert probe.returncode == 0, probe.stderr.decode()
+        assert probe.stdout.decode().strip() == "4.0"
 
 
 class TestSkillSignatureTypesReachTheNamespace:
