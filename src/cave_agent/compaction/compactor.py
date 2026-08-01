@@ -471,7 +471,7 @@ def _find_prior_summary(messages: list[Message]) -> tuple[int, str] | None:
 
     A summary is one because of its *type*, and nothing else qualifies. Text
     from a live conversation cannot establish provenance — both participants
-    write text — so a ``<=0.8.0`` history is converted by an explicit,
+    write text — so a pre-0.8.0 history is converted by an explicit,
     caller-invoked :func:`migrate_legacy_summaries` rather than being guessed
     at on every compaction.
     """
@@ -483,9 +483,9 @@ def _find_prior_summary(messages: list[Message]) -> tuple[int, str] | None:
 
 
 def migrate_legacy_summaries(messages: list[Message]) -> list[Message]:
-    """Convert ``<=0.8.0`` summary pairs into typed messages. Opt-in.
+    """Convert pre-0.8.0 summary pairs into typed messages. Opt-in.
 
-    Call this once when loading a history you know came from ``<=0.8.0``;
+    Call this once when loading a history you know came from before 0.8.0;
     otherwise that history's summaries are treated as ordinary turns and get
     re-summarized (fidelity lost, nothing corrupted).
 
@@ -516,7 +516,7 @@ def migrate_legacy_summaries(messages: list[Message]) -> list[Message]:
 
 
 def _followed_by_legacy_ack(messages: list[Message], index: int) -> bool:
-    """Whether a ``<=0.8.0`` acknowledgement follows *index*. Migration only."""
+    """Whether a pre-0.8.0 acknowledgement follows *index*. Migration only."""
     follower = index + 1
     return (
         follower < len(messages)

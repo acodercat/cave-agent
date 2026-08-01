@@ -84,10 +84,10 @@ _SUMMARY_CLOSE = "</conversation-summary>"
 
 COMPACTION_SUMMARY_USER_TEMPLATE = f"{_SUMMARY_OPEN}\n{{summary}}\n{_SUMMARY_CLOSE}"
 
-# The pre-envelope marker, kept only to recognize histories written by <=0.8.0.
+# The pre-envelope marker, kept only to recognize histories written before 0.8.0.
 # Content alone cannot separate a real legacy summary from a user message that
 # happens to reproduce the old template — the bytes are identical — so the
-# legacy form is recognized only together with the acknowledgement the <=0.8.0
+# legacy form is recognized only together with the acknowledgement the pre-0.8.0
 # builder emitted with it, unconditionally, in the very next message. That pair
 # is evidence a user message cannot manufacture by accident.
 COMPACTION_SUMMARY_MARKER = "[Previous conversation summary]"
@@ -126,7 +126,7 @@ _SUMMARY_PATTERN = re.compile(r"<summary>(.*?)</summary>", re.DOTALL)
 
 
 def parse_legacy_summary(content: str) -> str | None:
-    """The summary body of a ``<=0.8.0`` summary message, else ``None``.
+    """The summary body of a pre-0.8.0 summary message, else ``None``.
 
     Text matching only, and text is what users write — so this alone is not
     evidence. :func:`~cave_agent.compaction.migrate_legacy_summaries` is the

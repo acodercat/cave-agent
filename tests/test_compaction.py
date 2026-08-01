@@ -376,7 +376,7 @@ class TestSummaryIdentification:
 
 
 class TestLegacySummaryCompatibility:
-    """Histories written by <=0.8.0 have no type to carry, only text.
+    """Histories written before 0.8.0 have no type to carry, only text.
 
     Text from a live conversation cannot establish provenance — both
     participants write text — so conversion is an explicit call the caller
@@ -412,7 +412,7 @@ class TestLegacySummaryCompatibility:
         ] + _make_messages(20)
 
     async def test_migrated_legacy_history_compacts_incrementally(self):
-        """End to end against exactly what <=0.8.0's builder wrote."""
+        """End to end against exactly what the pre-0.8.0 builder wrote."""
         model = SummaryModel("UPDATED")
 
         await Compactor(model).summarize(migrate_legacy_summaries(self._legacy_history()))

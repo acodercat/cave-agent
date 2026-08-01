@@ -2066,7 +2066,7 @@ class TestAFailureWithNoOutputStillReadsAsOne:
 
 
 class TestLegacyTemplatesStillRender:
-    """<=0.8's default template carried {current_time}; a caller's copy of it
+    """The pre-0.8 default template carried {current_time}; a caller's copy of it
     raised KeyError on every run once the kwarg stopped being passed. Passing
     it costs nothing — str.format ignores unused kwargs — and the default
     template stays byte-stable since it no longer contains the field."""

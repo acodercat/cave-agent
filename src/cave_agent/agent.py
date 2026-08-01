@@ -603,7 +603,7 @@ class CaveAgent:
             # travels in a per-turn <system-reminder> so the system prompt
             # stays byte-stable for prompt caching. Still passed, because
             # str.format ignores unused kwargs and a caller's template copied
-            # from <=0.8 raises KeyError on every run without it.
+            # from pre-0.8 raises KeyError on every run without it.
             current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         )
 
