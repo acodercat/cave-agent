@@ -393,14 +393,24 @@ class StreamingTextParser:
         line = self.code_buffer.rstrip(" ").rstrip("\r\n")
         return (len(line) - len(line.rstrip("\\"))) % 2 == 1
 
+    @staticmethod
+    def _next_line_indent(indent: int | None, char: str) -> int | None:
+        """Advance the fence-anchoring state of a line by one character.
+
+        ``0`` after a newline, counting spaces up to Markdown's three-space
+        fence tolerance, ``None`` once the line holds anything else. One
+        function on purpose: the same rule anchors opening fences in prose and
+        closing fences in code, and two copies of it can drift apart.
+        """
+        if char == "\n":
+            return 0
+        if indent is not None and char == " " and indent < 3:
+            return indent + 1
+        return None
+
     def _track_text_char(self, char: str) -> None:
         """Track whether the next backtick could open a fence."""
-        if char == "\n":
-            self._text_line_indent = 0
-        elif self._text_line_indent is not None and char == " " and self._text_line_indent < 3:
-            self._text_line_indent += 1
-        else:
-            self._text_line_indent = None
+        self._text_line_indent = self._next_line_indent(self._text_line_indent, char)
 
     def _resume_text_after_replay(self, last_char: str) -> None:
         """Reset line tracking after buffered backticks are replayed as text.
@@ -425,12 +435,7 @@ class StreamingTextParser:
     def _append_code_character(self, char: str) -> None:
         """Append code while tracking whether a closing fence may start here."""
         self.code_buffer += char
-        if char == "\n":
-            self._code_line_indent = 0
-        elif self._code_line_indent is not None and char == " " and self._code_line_indent < 3:
-            self._code_line_indent += 1
-        else:
-            self._code_line_indent = None
+        self._code_line_indent = self._next_line_indent(self._code_line_indent, char)
 
     def _enter_code_block(self, fence_line_rest: str) -> None:
         """Enter code block mode and reset temporary buffers.

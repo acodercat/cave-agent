@@ -47,7 +47,9 @@ async def main():
         ],
     )
 
-    # Small context_window → compaction triggers after a few rounds
+    # A window this small is below the compaction buffer, so the threshold
+    # falls back to half the window (1,500 tokens) — which is the point:
+    # compaction triggers after a few rounds instead of after a real session.
     agent = CaveAgent(
         model,
         runtime=runtime,

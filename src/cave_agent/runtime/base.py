@@ -19,11 +19,15 @@ import threading
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from types import NoneType
-from typing import Any, ForwardRef, get_args, get_origin, get_type_hints
+from typing import Any, ForwardRef, TypeVar, get_args, get_origin, get_type_hints
 
 from .._placeholders import normalize_identifier, usable_identifier
 from .executor import ExecutionResult, RuntimeExecutionError
 from .primitives import Function, Type, Variable
+
+# The registrable descriptor kinds. Constrained (not bound) so each call
+# returns the concrete list type it was given.
+_DescriptorT = TypeVar("_DescriptorT", Function, Variable, Type)
 
 
 class BaseRuntime:
@@ -176,35 +180,9 @@ class BaseRuntime:
         with self._registry_lock:
             claimed = self._bound_names()
 
-            prepared_types: list[Type] = []
-            for original in types or []:
-                type_obj = copy.copy(original)
-                type_obj.name = self._claim_name(
-                    type_obj.name,
-                    "Type",
-                    taken=claimed,
-                )
-                prepared_types.append(type_obj)
-
-            prepared_functions: list[Function] = []
-            for original in functions or []:
-                function = copy.copy(original)
-                function.name = self._claim_name(
-                    function.name,
-                    "Function",
-                    taken=claimed,
-                )
-                prepared_functions.append(function)
-
-            prepared_variables: list[Variable] = []
-            for original in variables or []:
-                variable = copy.copy(original)
-                variable.name = self._claim_name(
-                    variable.name,
-                    "Variable",
-                    taken=claimed,
-                )
-                prepared_variables.append(variable)
+            prepared_types = self._claim_descriptors(types, "Type", claimed)
+            prepared_functions = self._claim_descriptors(functions, "Function", claimed)
+            prepared_variables = self._claim_descriptors(variables, "Variable", claimed)
 
             prepared_bindings: list[tuple[str, Any]] = []
             for name, value in bindings or []:
@@ -232,31 +210,47 @@ class BaseRuntime:
             else:
                 commit()
 
-            # Explicit resources now own their names, so inferred types can never
-            # displace them.
+            # Explicit resources now own their names, so inferred types can
+            # never displace them. Every registered value gets the same
+            # inference — one rule, not one per registration route: raw
+            # bindings used to skip it, so a skill whose instructions said to
+            # construct `Order(...)` shipped a namespace with no `Order`.
             for function in prepared_functions:
-                self._auto_inject_types_from_signature(function.func)
+                self._infer_custom_types(function.func)
             for variable in prepared_variables:
-                if variable.value is not None:
-                    self._try_auto_inject_type(
-                        type(variable.value),
-                        include_schema=False,
-                        include_doc=False,
-                    )
-            # Raw bindings get the same signature walk. Skill exports arrive
-            # this way — hidden from the prompt, but their instructions tell
-            # the model to construct the custom types those signatures name,
-            # and skipping the walk left `Order` in the instructions and a
-            # NameError in the namespace.
+                self._infer_custom_types(variable.value)
             for _, value in prepared_bindings:
-                if callable(value):
-                    self._auto_inject_types_from_signature(value)
-                elif value is not None:
-                    self._try_auto_inject_type(
-                        type(value),
-                        include_schema=False,
-                        include_doc=False,
-                    )
+                self._infer_custom_types(value)
+
+    def _infer_custom_types(self, value: Any) -> None:
+        """Make the custom types a value implies usable in generated code.
+
+        A callable's interesting types are in its signature; anything else's
+        in its class. Inferred types are hidden from the prompt and always
+        yield to explicit registrations.
+        """
+        if callable(value):
+            self._auto_inject_types_from_signature(value)
+        elif value is not None:
+            self._try_auto_inject_type(type(value), include_schema=False, include_doc=False)
+
+    def _claim_descriptors(
+        self,
+        originals: list[_DescriptorT] | None,
+        kind: str,
+        claimed: set[str],
+    ) -> list[_DescriptorT]:
+        """Copy *originals* and claim each name, normalized, against *claimed*.
+
+        The copy is what makes descriptors owned: updating one in this runtime
+        must not mutate the object another runtime was constructed from.
+        """
+        prepared = []
+        for original in originals or []:
+            descriptor = copy.copy(original)
+            descriptor.name = self._claim_name(descriptor.name, kind, taken=claimed)
+            prepared.append(descriptor)
+        return prepared
 
     def update_variable(self, name: str, value: Any):
         """Replace a registered variable's value, found by its normalized name.

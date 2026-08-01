@@ -166,3 +166,47 @@ class TestStopReasonCoverage:
         from cave_agent.renderers import _STOP_NOTICES
 
         assert set(_STOP_NOTICES) == set(StopReason) - {StopReason.COMPLETED}
+
+
+class TestMarkdownRebuildGate:
+    """TextEvents arrive per delta — often per character — and rich's
+    ``Markdown`` runs a full CommonMark parse of the whole buffer at
+    construction, before Live's paint throttle is consulted. Ungated that is
+    O(n²) CPU on the event loop. The gate defers rebuilds; it must never
+    drop the deferred tail."""
+
+    @staticmethod
+    def _counting_markdown(monkeypatch):
+        import cave_agent.renderers as renderers_module
+
+        built: list[str] = []
+        real = renderers_module.Markdown
+
+        def counting(text, *args, **kwargs):
+            built.append(text)
+            return real(text, *args, **kwargs)
+
+        monkeypatch.setattr(renderers_module, "Markdown", counting)
+        return built
+
+    async def test_per_character_prose_does_not_rebuild_per_character(self, monkeypatch):
+        built = self._counting_markdown(monkeypatch)
+        prose = "This answer is long enough to make a per-character parse hurt. " * 4
+
+        events = [TextEvent(c) for c in prose]
+        events.append(StoppedEvent(prose, StopReason.COMPLETED, 1, 0.5, TokenUsage()))
+        async for _ in TerminalRenderer().render(_events(*events)):
+            pass
+
+        assert len(built) < len(prose) / 10
+
+    async def test_the_deferred_tail_is_painted_before_the_block_freezes(self, monkeypatch):
+        built = self._counting_markdown(monkeypatch)
+        prose = "gated characters are deferred, never dropped"
+
+        events = [TextEvent(c) for c in prose]
+        events.append(StoppedEvent(prose, StopReason.COMPLETED, 1, 0.5, TokenUsage()))
+        async for _ in TerminalRenderer().render(_events(*events)):
+            pass
+
+        assert built[-1] == prose
