@@ -38,6 +38,7 @@ class StreamingTextParser:
         TEXT = "text"  # Normal text processing
         BACKTICK_COUNT = "backtick_count"  # Counting consecutive backticks
         LANGUAGE_MATCH = "language_match"  # Matching language identifier
+        INFO_STRING = "info_string"  # Discarding the rest of the fence line
         CODE = "code"  # Inside code block
         CODE_END_CHECK = "code_end_check"  # Checking for code block end
 
@@ -54,6 +55,7 @@ class StreamingTextParser:
             self.Mode.TEXT: self._handle_text_mode,
             self.Mode.BACKTICK_COUNT: self._handle_backtick_count_mode,
             self.Mode.LANGUAGE_MATCH: self._handle_language_match_mode,
+            self.Mode.INFO_STRING: self._handle_info_string_mode,
             self.Mode.CODE: self._handle_code_mode,
             self.Mode.CODE_END_CHECK: self._handle_code_end_check_mode,
         }
@@ -112,6 +114,10 @@ class StreamingTextParser:
             # Incomplete language match - treat as text
             self.text_buffer += "```" + self.language_match_buffer
 
+        elif self.mode == self.Mode.INFO_STRING:
+            # Stream ended on the fence line - replay it as text
+            self.text_buffer += "```" + self.language_match_buffer + self._info_buffer
+
         elif self.mode == self.Mode.CODE_END_CHECK:
             # Incomplete code end check - add to code buffer
             self.code_buffer += "`" * self.backtick_count
@@ -142,6 +148,8 @@ class StreamingTextParser:
         self.code_buffer = ""
         self.backtick_count = 0
         self.language_match_buffer = ""
+        # Discarded fence-line remainder, kept only for text replay on flush.
+        self._info_buffer = ""
         self.in_code_block = False
         self.first_code_block_completed = False
         self.remainder = ""
@@ -254,14 +262,31 @@ class StreamingTextParser:
 
         # Language identifier matched, check for valid delimiter
         else:
-            if char in ("\n", " ", "\r"):
+            if char == "\n":
                 # Valid code block start
                 self._enter_code_block(char)
                 # Don't add delimiter to code buffer
                 return []
+            elif char in (" ", "\r"):
+                # The rest of the fence line is Markdown's info string
+                # (```python copy). It is discarded — treating it as code
+                # executed whatever trailed the tag — but buffered, so a
+                # stream that ends inside it can replay the line as text.
+                self.mode = self.Mode.INFO_STRING
+                self._info_buffer = char
+                return []
             else:
                 # Invalid delimiter (e.g., ```pythonscript)
                 return failed_match()
+
+    def _handle_info_string_mode(self, char: str) -> list[Segment]:
+        """Swallow the fence line's info string; code starts on the next line."""
+        if char == "\n":
+            self._enter_code_block(self._info_buffer + char)
+            self._info_buffer = ""
+        else:
+            self._info_buffer += char
+        return []
 
     def _handle_code_mode(self, char: str) -> list[Segment]:
         """
@@ -407,17 +432,19 @@ class StreamingTextParser:
         else:
             self._code_line_indent = None
 
-    def _enter_code_block(self, delimiter: str) -> None:
+    def _enter_code_block(self, fence_line_rest: str) -> None:
         """Enter code block mode and reset temporary buffers.
 
-        The opening is recorded verbatim so an empty fence can be handed back
-        as the text the model actually wrote.
+        *fence_line_rest* is everything the model wrote after the language tag
+        (delimiter, any discarded info string, the newline). The opening is
+        recorded verbatim — actual casing, actual info string — so an empty
+        fence can be handed back as exactly the text the model wrote.
         """
         self.in_code_block = True
         self.mode = self.Mode.CODE
+        self._code_block_opening = "```" + self.language_match_buffer + fence_line_rest
         self.language_match_buffer = ""
         self._code_line_indent = 0
-        self._code_block_opening = f"```{self.language_identifier}{delimiter}"
 
     def _exit_code_block(self) -> None:
         """Exit code block mode and reset counters."""
