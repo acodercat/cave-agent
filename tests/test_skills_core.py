@@ -781,6 +781,23 @@ class TestInjectionModulesResolveTheirOwnClasses:
 
         assert "skill_injection_broken-skill" not in sys.modules
 
+    def test_a_module_that_deregisters_itself_does_not_mask_the_outcome(self, temp_dir):
+        """A module body may pop its own sys.modules entry (a known re-import
+        trick). The cleanup must tolerate the missing key — a raise from
+        ``finally`` replaces whatever was propagating."""
+        self._write_skill(
+            Path(temp_dir),
+            "self-removing-skill",
+            "import sys\n"
+            "sys.modules.pop(__name__, None)\n"
+            "from cave_agent import Variable\n"
+            "__exports__ = [Variable('v', 1)]\n",
+        )
+
+        (skill,) = SkillDiscovery.from_directory(Path(temp_dir))
+
+        assert [v.name for v in skill.variables] == ["v"]
+
     def test_skill_exports_survive_a_process_boundary(self, temp_dir):
         """The offline stand-in for the kernel backend: a skill function must
         deserialize in an interpreter that never loaded the skill. This is the

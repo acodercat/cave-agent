@@ -12,11 +12,15 @@ Unit suites already pin each mechanism against controlled input; these prove
 the wiring under traffic we do not control.
 """
 
-
 from cave_agent import CaveAgent
 from cave_agent.events import ExecutionResultEvent, StoppedEvent, StopReason
 from cave_agent.messages import MessageRole
 from cave_agent.runtime import IPythonRuntime
+
+
+def _execution_outputs(agent: CaveAgent) -> list[str]:
+    """The execution results in history, oldest first — what the model saw."""
+    return [m.content for m in agent.messages if m.role == MessageRole.EXECUTION_RESULT]
 
 
 class TestLiveUsageAccounting:
@@ -130,7 +134,7 @@ class TestLiveStreamingParsing:
             "print('SECOND'). Do not combine them into one block."
         )
 
-        outputs = [m.content for m in agent.messages if m.role == MessageRole.EXECUTION_RESULT]
+        outputs = _execution_outputs(agent)
         first_seen = next((i for i, out in enumerate(outputs) if "FIRST" in out), None)
         second_seen = next((i for i, out in enumerate(outputs) if "SECOND" in out), None)
         assert first_seen is not None, "the first block must execute"
@@ -152,6 +156,6 @@ class TestLiveErrorFeedback:
         )
 
         assert response.stop_reason is StopReason.COMPLETED
-        outputs = [m.content for m in agent.messages if m.role == MessageRole.EXECUTION_RESULT]
+        outputs = _execution_outputs(agent)
         assert any("NameError" in out for out in outputs)
         assert any("42" in out for out in outputs)

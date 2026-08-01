@@ -187,7 +187,11 @@ class SkillDiscovery:
                 f"Error loading injection module '{injection_path}': {error}"
             ) from error
         finally:
-            del sys.modules[spec.name]
+            # ``pop``, not ``del``: a module body may remove its own entry (a
+            # known re-import trick), and a raise from ``finally`` *replaces*
+            # whatever was propagating — the same failure mode the stream-close
+            # path guards against.
+            sys.modules.pop(spec.name, None)
 
         if not hasattr(module, "__exports__"):
             raise cls.Error(f"Missing __exports__ in '{injection_path}'")
