@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# A second push to the same branch supersedes the first: nobody reads the
+# result of a run against a commit that is already two behind.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      # Both versions the package claims in its classifiers. ``fail-fast``
+      # off because "3.13 broke, 3.12 is fine" is the useful answer, and
+      # cancelling the other job takes it away.
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      # ``--locked`` fails when uv.lock does not match pyproject.toml, so a
+      # dependency change that skipped the lockfile is caught here rather than
+      # becoming whatever resolves on the day.
+      - name: Install
+        run: uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format
+        run: uv run ruff format --check .
+
+      # Config in [tool.pyright]: `standard` mode over `src`.
+      - name: Type check
+        run: uv run pyright
+
+      # No credentials, so the tests that need a live LLM skip themselves —
+      # see tests/conftest.py. What runs is the offline suite, which includes
+      # real IPython and Jupyter kernels; those are slow by nature (they
+      # measure timeout and latency behaviour), so a few minutes here is the
+      # suite working, not hanging.
+      - name: Test
+        run: uv run pytest tests/ -q
