@@ -21,7 +21,7 @@ def generate_data(n: int) -> list[dict]:
 
 
 @pytest.fixture
-def small_output_model():
+def small_output_model(live_llm_env):
     """Model with max_tokens=150 to force output truncation."""
     return OpenAIModel(
         model_id=os.getenv("LLM_MODEL_ID"),
