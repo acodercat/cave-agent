@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# A second push to the same branch supersedes the first: nobody reads the
+# result of a run against a commit that is already two behind.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Interpreter-independent, so it runs once rather than per matrix leg.
+  # ``[tool.pyright]`` pins ``pythonVersion = "3.12"`` on purpose — checking a
+  # library against its *lowest* supported version is what catches a 3.13-only
+  # API creeping in, and checking it against 3.13 would not. Running it on both
+  # legs would therefore be the same work twice, and would suggest a 3.13 type
+  # check that is not happening.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      # ``--locked`` fails when uv.lock does not match pyproject.toml, so a
+      # dependency change that skipped the lockfile is caught here rather than
+      # becoming whatever resolves on the day.
+      - name: Install
+        run: uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run pyright
+
+  test:
+    runs-on: ubuntu-latest
+    # The suite drives real IPython and Jupyter kernels, including cells that
+    # deliberately stall to exercise timeout handling — so it is minutes, not
+    # seconds, and a wedged kernel is a plausible failure. Without a bound that
+    # failure costs six hours of runner time per leg before anyone hears; a
+    # normal run finishes in about three minutes.
+    timeout-minutes: 15
+    strategy:
+      # Both versions the package claims in its classifiers. ``fail-fast``
+      # off because "3.13 broke, 3.12 is fine" is the useful answer, and
+      # cancelling the other leg takes it away.
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: uv sync --locked
+
+      # No credentials, so the tests that need a live LLM skip themselves —
+      # see tests/conftest.py.
+      - name: Test
+        run: uv run pytest tests/ -q

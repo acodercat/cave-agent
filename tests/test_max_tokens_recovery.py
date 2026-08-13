@@ -3,6 +3,7 @@
 import os
 
 import pytest
+import pytest_asyncio
 
 from cave_agent import CaveAgent
 from cave_agent.models import OpenAIModel
@@ -20,15 +21,22 @@ def generate_data(n: int) -> list[dict]:
     ]
 
 
-@pytest.fixture
-def small_output_model():
-    """Model with max_tokens=150 to force output truncation."""
-    return OpenAIModel(
+@pytest_asyncio.fixture
+async def small_output_model(live_llm_env):
+    """Model with max_tokens=150 to force output truncation.
+
+    Closed like the shared ``model`` fixture: ``OpenAIModel`` builds its
+    ``AsyncOpenAI`` eagerly, so returning one without closing leaks a
+    connection pool and an unclosed-client warning at loop teardown.
+    """
+    engine = OpenAIModel(
         model_id=os.getenv("LLM_MODEL_ID"),
         api_key=os.getenv("LLM_API_KEY"),
         base_url=os.getenv("LLM_BASE_URL"),
         max_tokens=150,
     )
+    yield engine
+    await engine.aclose()
 
 
 @pytest.fixture
