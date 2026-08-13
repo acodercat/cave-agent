@@ -1,7 +1,8 @@
 """Live-provider tests for behaviour a fake cannot prove.
 
 Everything here needs ``LLM_MODEL_ID`` / ``LLM_API_KEY`` / ``LLM_BASE_URL``
-(the ``model`` fixture errors without them, like every live suite). Assertions
+(the ``model`` fixture skips without them, so a clone with no endpoint
+configured reads a skip rather than a failure). Assertions
 are structural — stop reason, event shape, namespace state — never exact
 wording, because the model's prose is not ours to pin.
 
