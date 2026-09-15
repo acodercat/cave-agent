@@ -683,7 +683,7 @@ model = LiteLLMModel(
 
 # Anthropic Claude
 model = LiteLLMModel(
-    model_id="claude-3-sonnet-20240229", api_key="your-api-key", custom_llm_provider="anthropic"
+    model_id="claude-sonnet-5", api_key="your-api-key", custom_llm_provider="anthropic"
 )
 
 # Google Gemini
